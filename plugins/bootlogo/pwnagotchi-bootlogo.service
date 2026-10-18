@@ -1,0 +1,13 @@
+[Unit]
+Description=Pwnagotchi boot logo
+DefaultDependencies=no
+After=local-fs.target
+Before=pwnagotchi.service
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/python3 /usr/local/bin/pwnagotchi-bootlogo.py
+RemainAfterExit=no
+
+[Install]
+WantedBy=multi-user.target

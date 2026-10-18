@@ -1,0 +1,12 @@
+# Конфиг плагина bootlogo. Скопируй нужное в /etc/pwnagotchi/config.toml.
+
+main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
+main.plugins.bootlogo.enabled = true
+
+# Куда сохраняется готовое бут-лого (1-бит PNG под размер экрана).
+main.plugins.bootlogo.path = "/root/pwnagotchi-bootlogo.png"
+
+# Размер экрана определяется автоматически. Если не определился — задай вручную
+# (например, Waveshare 2.13" = 250x122, 2.7" = 264x176, 2.9" = 296x128):
+# main.plugins.bootlogo.width = 250
+# main.plugins.bootlogo.height = 122
