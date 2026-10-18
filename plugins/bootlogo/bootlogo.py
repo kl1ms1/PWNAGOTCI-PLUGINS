@@ -2,20 +2,22 @@
 bootlogo — кастомное бут-лого для Pwnagotchi.
 
 Веб-морда (http://<ip>:8080/plugins/bootlogo/):
-  • перетащи/выбери фото → живое превью в рамке «как на e-ink» (без перезагрузок);
-  • подгон: вписать / обрезать / растянуть / по центру;
-  • эффекты: дизеринг (Floyd–Steinberg) или порог, инверсия, яркость, контраст, поворот;
-  • «Сохранить как бут-лого» и «Показ при загрузке» (вкл/выкл systemd-сервиса,
-    который рисует лого на e-ink сразу при включении, с жёстким таймаутом).
+  • перетащи/выбери фото — вся обработка и превью идут ПРЯМО В БРАУЗЕРЕ (мгновенно,
+    без запросов к девайсу): подгон (вписать/обрезать/растянуть/по центру), дизеринг
+    (Floyd–Steinberg) или порог, инверсия, яркость, контраст, поворот;
+  • 👁 «Показать на экране» — выводит картинку на e-ink на ~4 c без перезагрузки;
+  • 💾 «Сохранить как бут-лого» — на девайс уходит только маленький финальный PNG;
+  • переключатель «Показ при загрузке» (systemd-сервис с таймаутом);
+  • переключатель языка RU/EN.
 
-Размер экрана определяется автоматически (по рендеру UI); можно задать width/height
-в config.toml.
+Размер экрана определяется автоматически (по рендеру UI); можно задать width/height.
 """
 
+import io
 import logging
 import os
-import shutil
-import subprocess
+import threading
+import time
 
 import pwnagotchi.plugins as plugins
 
@@ -102,20 +104,18 @@ if __name__ == "__main__":
 
 class Bootlogo(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.3.1"
+    __version__ = "0.4.0"
     __license__ = "MIT"
-    __description__ = "Кастомное бут-лого с веб-загрузчиком и авто-обработкой под e-ink."
+    __description__ = "Кастомное бут-лого: обработка в браузере, показ на экране, бут-сплэш."
 
     def __init__(self):
         self._w = 250
         self._h = 122
         self._display_type = ""
+        self._view = None
         self._dir = "/root/.bootlogo"
-        self._orig = os.path.join(self._dir, "original")
         self._preview = os.path.join(self._dir, "preview.png")
         self._logo = "/root/pwnagotchi-bootlogo.png"
-        self._p = dict(fit="contain", dither="floyd", threshold=128,
-                       brightness=1.0, contrast=1.0, rotate=0, invert=False)
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
@@ -139,7 +139,8 @@ class Bootlogo(plugins.Plugin):
         except Exception:
             pass
         try:
-            im = agent.view().image()
+            self._view = agent.view()
+            im = self._view.image()
             if im is not None and im.size[0] > 0:
                 self._w, self._h = im.size
         except Exception:
@@ -147,101 +148,78 @@ class Bootlogo(plugins.Plugin):
         logging.info("[bootlogo] ready (display=%s, %dx%d)",
                      self._display_type, self._w, self._h)
 
-    # --- обработка изображения --------------------------------------------
-    def _process(self, src_path):
-        from PIL import Image, ImageOps, ImageEnhance
-        try:
-            RS = Image.Resampling.LANCZOS   # Pillow >= 9.1
-        except AttributeError:
-            RS = Image.LANCZOS              # старые версии
-        W, H = self._w, self._h
-        p = self._p
+    # --- картинка ----------------------------------------------------------
+    def _to_logo(self, b64):
+        """base64 (PNG из браузера, уже ч/б) -> PIL '1' точного размера экрана."""
+        import base64
+        from PIL import Image
+        if "," in b64:
+            b64 = b64.split(",", 1)[1]
+        img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("L")
+        if img.size != (self._w, self._h):
+            img = img.resize((self._w, self._h))
+        # порог, а не дизеринг: картинка уже ч/б, сохраняем как есть
+        return img.point(lambda v: 255 if v >= 128 else 0, mode="1")
 
-        img = Image.open(src_path)
-        img = ImageOps.exif_transpose(img)
+    def _show_on_device(self, path, seconds=4):
+        """Показать картинку на e-ink, отдав её в штатный рендер-поток pwnagotchi."""
+        ui = self._view
+        if ui is None:
+            return False, "Дисплей недоступен"
+        impl = getattr(ui, "_implementation", None)
+        ev = getattr(ui, "_canvas_next_event", None)
+        lock = getattr(ui, "_lock", None)
+        if impl is None or ev is None or lock is None:
+            return False, "Дисплей не поддерживает предпоказ"
+        from PIL import Image
+        img = Image.open(path).convert("1")
+        rot = int(getattr(ui, "_rotation", 0) or 0)
+        disp = img if rot == 0 else img.rotate(rot)
 
-        if img.mode in ("RGBA", "LA", "P"):
-            img = img.convert("RGBA")
-            bg = Image.new("RGBA", img.size, (255, 255, 255, 255))
-            img = Image.alpha_composite(bg, img)
-        img = img.convert("L")
-
-        rot = int(p["rotate"]) % 360
-        if rot:
-            img = img.rotate(-rot, expand=True, fillcolor=255)
-
-        if float(p["brightness"]) != 1.0:
-            img = ImageEnhance.Brightness(img).enhance(float(p["brightness"]))
-        if float(p["contrast"]) != 1.0:
-            img = ImageEnhance.Contrast(img).enhance(float(p["contrast"]))
-        if p["invert"]:
-            img = ImageOps.invert(img)
-
-        fit = p["fit"]
-        if fit == "stretch":
-            g = img.resize((W, H), RS)
-        elif fit == "cover":
-            g = ImageOps.fit(img, (W, H), method=RS, centering=(0.5, 0.5))
-        elif fit == "center":
-            g = Image.new("L", (W, H), 255)
-            left = max(0, (img.width - W) // 2)
-            top = max(0, (img.height - H) // 2)
-            crop = img.crop((left, top, left + min(W, img.width),
-                             top + min(H, img.height)))
-            g.paste(crop, ((W - crop.width) // 2, (H - crop.height) // 2))
-        else:  # contain
-            im2 = img.copy()
-            im2.thumbnail((W, H), RS)
-            g = Image.new("L", (W, H), 255)
-            g.paste(im2, ((W - im2.width) // 2, (H - im2.height) // 2))
-
-        if p["dither"] == "none":
-            thr = int(p["threshold"])
-            out = g.point(lambda v: 255 if v >= thr else 0, mode="1")
-        else:
-            out = g.convert("1")
-        return out
-
-    def _read_params(self, form):
-        def f(name, default, cast):
+        def run():
             try:
-                return cast(form.get(name, default))
+                with lock:
+                    ui._frozen = True            # остановить штатные апдейты UI
+                ui._canvas_next = disp           # отдаём наш кадр
+                ev.set()                         # будим единственный рендер-поток
+                time.sleep(max(1, min(10, seconds)))
             except Exception:
-                return default
-        self._p = dict(
-            fit=form.get("fit", "contain"),
-            dither=form.get("dither", "floyd"),
-            threshold=f("threshold", 128, int),
-            brightness=f("brightness", 1.0, float),
-            contrast=f("contrast", 1.0, float),
-            rotate=f("rotate", 0, int),
-            invert=(form.get("invert") in ("on", "1", "true", "True")),
-        )
+                logging.exception("[bootlogo] on-device preview failed")
+            finally:
+                try:
+                    ui._frozen = False           # гарантированно разморозить
+                except Exception:
+                    pass
+                try:
+                    ui.update(force=True)        # вернуть обычный экран
+                except Exception:
+                    pass
 
-    # --- действия ----------------------------------------------------------
-    def _save_boot_logo(self):
-        if not os.path.exists(self._preview):
-            raise RuntimeError("нет превью — сначала обработай картинку")
-        shutil.copyfile(self._preview, self._logo)
+        threading.Thread(target=run, name="bootlogo-ondevice", daemon=True).start()
+        return True, "Показываю на экране ~%d c" % seconds
+
+    # --- бут-сервис --------------------------------------------------------
+    def _service_enabled(self):
+        return os.path.exists(_SERVICE_PATH)
 
     def _install_service(self):
+        import subprocess
         try:
-            script = _BOOT_SCRIPT.format(logo=self._logo,
-                                         type=self._display_type or "")
+            script = _BOOT_SCRIPT.format(logo=self._logo, type=self._display_type or "")
             with open(_BOOT_SCRIPT_PATH, "w") as fh:
                 fh.write(script)
             os.chmod(_BOOT_SCRIPT_PATH, 0o755)
             with open(_SERVICE_PATH, "w") as fh:
                 fh.write(_SERVICE_UNIT.format(script=_BOOT_SCRIPT_PATH))
             subprocess.run(["systemctl", "daemon-reload"], check=True)
-            subprocess.run(["systemctl", "enable", "pwnagotchi-bootlogo.service"],
-                           check=True)
+            subprocess.run(["systemctl", "enable", "pwnagotchi-bootlogo.service"], check=True)
             return True, "Показ при загрузке включён"
         except Exception as e:
             logging.exception("[bootlogo] install service failed")
             return False, "Не удалось включить: %s" % e
 
     def _uninstall_service(self):
+        import subprocess
         try:
             subprocess.run(["systemctl", "disable", "--now",
                             "pwnagotchi-bootlogo.service"], check=False)
@@ -254,25 +232,6 @@ class Bootlogo(plugins.Plugin):
             logging.exception("[bootlogo] uninstall service failed")
             return False, "Не удалось выключить: %s" % e
 
-    def _service_enabled(self):
-        return os.path.exists(_SERVICE_PATH)
-
-    def _save_upload(self, request):
-        """Принимаем картинку надёжно: сначала base64-поле, затем multipart-файл."""
-        b64 = request.form.get("image_b64") if request.form else None
-        if b64:
-            import base64
-            if "," in b64:
-                b64 = b64.split(",", 1)[1]
-            with open(self._orig, "wb") as fh:
-                fh.write(base64.b64decode(b64))
-            return True
-        up = request.files.get("image") if request.files else None
-        if up and up.filename:
-            up.save(self._orig)
-            return True
-        return False
-
     # --- web API -----------------------------------------------------------
     def on_webhook(self, path, request):
         from flask import send_file, jsonify, abort
@@ -280,26 +239,32 @@ class Bootlogo(plugins.Plugin):
             if request.method == "GET":
                 if path in (None, "", "/"):
                     return self._page()
-                if path == "preview.png" and os.path.exists(self._preview):
-                    return send_file(self._preview, mimetype="image/png")
                 if path == "current.png" and os.path.exists(self._logo):
                     return send_file(self._logo, mimetype="image/png")
+                if path == "preview.png" and os.path.exists(self._preview):
+                    return send_file(self._preview, mimetype="image/png")
                 abort(404)
 
             action = (path or "").strip("/")
-            if action == "process":
-                got = self._save_upload(request)
-                logging.info("[bootlogo] process: upload=%s files=%s form=%s",
-                             got, list((request.files or {}).keys()),
-                             list((request.form or {}).keys()))
-                self._read_params(request.form)
-                if not os.path.exists(self._orig):
-                    return jsonify(ok=False, msg="Сначала загрузи изображение"), 400
-                self._process(self._orig).save(self._preview)
-                return jsonify(ok=True, w=self._w, h=self._h)
+            b64 = request.form.get("logo_b64") if request.form else None
+
             if action == "save":
-                self._save_boot_logo()
+                if not b64:
+                    return jsonify(ok=False, msg="Нет картинки"), 400
+                self._to_logo(b64).save(self._logo)
                 return jsonify(ok=True, msg="Сохранено как бут-лого ✅")
+
+            if action == "ondevice":
+                if b64:
+                    self._to_logo(b64).save(self._preview)
+                    src = self._preview
+                elif os.path.exists(self._logo):
+                    src = self._logo
+                else:
+                    return jsonify(ok=False, msg="Нет картинки"), 400
+                ok, msg = self._show_on_device(src, 4)
+                return jsonify(ok=ok, msg=msg)
+
             if action == "install":
                 ok, msg = self._install_service()
                 return jsonify(ok=ok, msg=msg)
@@ -339,12 +304,9 @@ padding:6px 12px;font-size:.8rem;cursor:pointer}
 color:var(--mut);cursor:pointer;transition:.15s}
 .drop:hover,.drop.hot{border-color:var(--acc);color:var(--fg);background:#0b1b33}
 .stage{display:flex;justify-content:center;margin:4px 0 2px}
-.frame{background:#c9ccd1;border-radius:14px;padding:12px;box-shadow:0 6px 18px #0008;max-width:100%;
-transition:opacity .15s}
-.frame.busy{opacity:.55}
-.screen{background:#fff;border-radius:4px;overflow:hidden;aspect-ratio:__W__/__H__;
-width:min(420px,78vw)}
-.screen img{width:100%;height:100%;display:block;image-rendering:pixelated}
+.frame{background:#c9ccd1;border-radius:14px;padding:12px;box-shadow:0 6px 18px #0008;max-width:100%}
+.screen{background:#fff;border-radius:4px;overflow:hidden;aspect-ratio:__W__/__H__;width:min(420px,78vw)}
+.screen canvas{width:100%;height:100%;display:block;image-rendering:pixelated}
 .ph{display:flex;align-items:center;justify-content:center;height:100%;color:#9aa0a6;font-size:.85rem;text-align:center;padding:8px}
 .dim{text-align:center;color:var(--mut);font-size:.8rem;margin-top:6px}
 label{display:block;font-size:.82rem;color:var(--mut);margin:10px 0 4px}
@@ -373,8 +335,8 @@ pointer-events:none;max-width:90vw;text-align:center}
 <div class="card">
   <div id="drop" class="drop"></div>
   <input id="file" type="file" accept="image/*" hidden>
-  <div class="stage"><div class="frame" id="frame"><div class="screen">
-    <img id="prev" alt="" style="display:none">
+  <div class="stage"><div class="frame"><div class="screen">
+    <canvas id="cv" style="display:none"></canvas>
     <div id="ph" class="ph"></div>
   </div></div></div>
   <div class="dim" id="dim"></div>
@@ -407,7 +369,10 @@ pointer-events:none;max-width:90vw;text-align:center}
 </div>
 
 <div class="card">
-  <div class="actions"><button class="btn save" id="bSave" disabled></button></div>
+  <div class="actions">
+    <button class="btn save" id="bSave" disabled></button>
+    <button class="btn" id="bDev" disabled></button>
+  </div>
   <div class="actions" style="margin-top:10px"><button class="btn ghost" id="bInstall"></button></div>
   <div class="muted" id="note"></div>
 </div>
@@ -418,33 +383,35 @@ pointer-events:none;max-width:90vw;text-align:center}
 <script>
 const BASE="/plugins/bootlogo/";
 const SCRW=__W__, SCRH=__H__, DISP="__DISP__";
-let hasFile=false, svc=(__SVC__===1), busy=false, t=null, lastDim="", curImg="";
+let svc=(__SVC__===1), srcImg=null, lang="ru", devCooldown=false;
 const P={fit:"contain",dither:"floyd",rotate:"0",brightness:"1.0",contrast:"1.0",threshold:"128",invert:"0"};
 const $=id=>document.getElementById(id);
+const cv=$("cv"); cv.width=SCRW; cv.height=SCRH;
 
 const I18N={
  ru:{lang:"EN",subScreen:"Экран",subDisplay:"дисплей",
   drop:"📷 Перетащи фото сюда или нажми, чтобы выбрать",
-  ph:"превью появится здесь",dimDef:"предпросмотр как на e-ink",dimDone:"обработано",
+  ph:"превью появится здесь",dimDef:"предпросмотр как на e-ink",dimDone:"готово",
   lFit:"Подгон под экран",contain:"Вписать",cover:"Обрезать",stretch:"Растянуть",center:"По центру",
   lBw:"Перевод в ч/б",floyd:"Дизеринг",none:"Порог",lRot:"Поворот",
   lBr:"Яркость",lCt:"Контраст",lTh:"Порог ч/б (для «Порога»)",lInv:"Инверсия (негатив)",
-  save:"💾 Сохранить как бут-лого",svcOn:"⚙️ Включить показ при загрузке",svcOff:"🧹 Выключить показ при загрузке",
-  note:"Сохранение не трогает экран. «Показ при загрузке» рисует лого при включении (таймаут 20 c).",
+  save:"💾 Сохранить как бут-лого",dev:"👁 Показать на экране",
+  svcOn:"⚙️ Включить показ при загрузке",svcOff:"🧹 Выключить показ при загрузке",
+  note:"Обработка идёт в браузере. «Показать на экране» выводит картинку на e-ink на ~4 c без перезагрузки.",
   footer:"bootlogo · только для своих устройств 🫡",
-  net:"Сеть недоступна",err:"Ошибка"},
+  net:"Сеть недоступна",err:"Ошибка",noimg:"Сначала загрузи фото"},
  en:{lang:"RU",subScreen:"Screen",subDisplay:"display",
   drop:"📷 Drop a photo here or tap to choose",
-  ph:"preview will appear here",dimDef:"e-ink preview",dimDone:"processed",
+  ph:"preview will appear here",dimDef:"e-ink preview",dimDone:"ready",
   lFit:"Fit to screen",contain:"Fit",cover:"Crop",stretch:"Stretch",center:"Center",
   lBw:"Black & white",floyd:"Dithering",none:"Threshold",lRot:"Rotate",
   lBr:"Brightness",lCt:"Contrast",lTh:"B/W threshold (for «Threshold»)",lInv:"Invert (negative)",
-  save:"💾 Save as boot logo",svcOn:"⚙️ Enable boot splash",svcOff:"🧹 Disable boot splash",
-  note:"Saving does not touch the screen. «Boot splash» draws the logo at power-on (20s timeout).",
+  save:"💾 Save as boot logo",dev:"👁 Show on screen",
+  svcOn:"⚙️ Enable boot splash",svcOff:"🧹 Disable boot splash",
+  note:"Processing runs in your browser. «Show on screen» draws it on the e-ink for ~4s, no reboot.",
   footer:"bootlogo · for your own devices only 🫡",
-  net:"Network unavailable",err:"Error"}
+  net:"Network unavailable",err:"Error",noimg:"Load a photo first"}
 };
-let lang="ru";
 try{lang=localStorage.getItem("bl_lang")||"ru";}catch(e){}
 function D(){return I18N[lang];}
 
@@ -452,13 +419,14 @@ function applyLang(){
   const d=D();
   $("langBtn").textContent=d.lang;
   $("sub").innerHTML=d.subScreen+" <b>"+SCRW+"×"+SCRH+"</b> · "+d.subDisplay+" <code>"+DISP+"</code>";
-  $("drop").textContent=d.drop; $("ph").textContent=d.ph;
-  $("dim").textContent=lastDim?(d.dimDone+" "+lastDim):d.dimDef;
+  $("drop").textContent=d.drop; if(!srcImg)$("ph").textContent=d.ph;
+  $("dim").textContent=srcImg?(d.dimDone+" · "+SCRW+"×"+SCRH+" · 1-bit"):d.dimDef;
   $("lFit").textContent=d.lFit; $("lBw").textContent=d.lBw; $("lRot").textContent=d.lRot;
   $("lBr").textContent=d.lBr; $("lCt").textContent=d.lCt; $("lTh").textContent=d.lTh; $("lInv").textContent=d.lInv;
   document.querySelector('[data-k=fit]').querySelectorAll('button').forEach(b=>b.textContent=d[b.dataset.v]);
   document.querySelector('[data-k=dither]').querySelectorAll('button').forEach(b=>b.textContent=d[b.dataset.v]);
-  $("bSave").textContent=d.save; $("note").textContent=d.note; $("footer").textContent=d.footer;
+  $("bSave").textContent=d.save; $("bDev").textContent=d.dev;
+  $("note").textContent=d.note; $("footer").textContent=d.footer;
   svcLabel();
 }
 $("langBtn").addEventListener("click",()=>{lang=(lang==="ru")?"en":"ru";
@@ -467,75 +435,93 @@ $("langBtn").addEventListener("click",()=>{lang=(lang==="ru")?"en":"ru";
 function toast(m){const e=$("toast");e.textContent=m;e.classList.add("show");
   clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("show"),2600);}
 function svcLabel(){$("bInstall").textContent=svc?D().svcOff:D().svcOn;}
-function setBusy(b){$("frame").classList.toggle("busy",b);}
 
-document.querySelectorAll(".seg").forEach(seg=>{
-  seg.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
-    seg.querySelectorAll("button").forEach(x=>x.classList.remove("on"));
-    b.classList.add("on");P[seg.dataset.k]=b.dataset.v;process();});
-});
-[["brightness","vbr"],["contrast","vct"],["threshold","vth"]].forEach(([id,lab])=>{
-  $(id).addEventListener("input",()=>{P[id]=$(id).value;$(lab).textContent=$(id).value;debounce();});
-});
-$("invert").addEventListener("change",()=>{P.invert=$("invert").checked?"1":"0";process();});
-
+// ---- выбор файла ----
 $("drop").addEventListener("click",()=>$("file").click());
 $("file").addEventListener("change",()=>{if($("file").files[0])pick($("file").files[0]);});
 ["dragover","dragenter"].forEach(ev=>$("drop").addEventListener(ev,e=>{e.preventDefault();$("drop").classList.add("hot");}));
 ["dragleave","drop"].forEach(ev=>$("drop").addEventListener(ev,e=>{e.preventDefault();$("drop").classList.remove("hot");}));
 $("drop").addEventListener("drop",e=>{const f=e.dataTransfer.files[0];if(f)pick(f);});
 
-function debounce(){clearTimeout(t);t=setTimeout(()=>process(),250);}
-
-// сжимаем фото прямо в браузере в компактный base64 — надёжно парсится сервером
-function downscale(file){
-  return new Promise(res=>{
-    const url=URL.createObjectURL(file), im=new Image();
-    im.onload=()=>{URL.revokeObjectURL(url);
-      const max=820; let w=im.naturalWidth,h=im.naturalHeight;
-      if(Math.max(w,h)>max){const s=max/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
-      const c=document.createElement("canvas");c.width=w;c.height=h;
-      c.getContext("2d").drawImage(im,0,0,w,h);
-      try{res(c.toDataURL("image/jpeg",0.82));}catch(e){res("");}};
-    im.onerror=()=>{URL.revokeObjectURL(url);
-      const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>res("");r.readAsDataURL(file);};
-    im.src=url;});
-}
-async function pick(file){curImg=await downscale(file);if(curImg)process(true);else toast(D().err);}
-
-async function process(withImage){
-  if(!hasFile && !withImage) return;
-  if(busy){debounce();return;}
-  busy=true; setBusy(true);
-  const fd=new FormData();
-  if(withImage && curImg) fd.append("image_b64",curImg);
-  for(const k in P) fd.append(k,P[k]);
-  try{
-    const r=await fetch(BASE+"process",{method:"POST",body:fd,credentials:"same-origin"});
-    let j=null; try{j=await r.json();}catch(e){}
-    if(!r.ok || !j){toast(D().err+" "+r.status);return finish();}
-    if(!j.ok){toast(j.msg||D().err);return finish();}
-    hasFile=true;
+function pick(file){
+  const url=URL.createObjectURL(file), im=new Image();
+  im.onload=()=>{URL.revokeObjectURL(url);srcImg=im;
     $("controls").style.opacity=1;$("controls").style.pointerEvents="auto";
-    $("bSave").disabled=false; $("ph").style.display="none";
-    const img=$("prev");img.style.display="block";
-    img.src=BASE+"preview.png?ts="+Date.now();
-    lastDim=j.w+"×"+j.h+" · 1-bit"; $("dim").textContent=D().dimDone+" "+lastDim;
-  }catch(e){toast(D().net);}
-  finish();
-  function finish(){busy=false;setBusy(false);}
+    $("bSave").disabled=false;$("bDev").disabled=false;
+    $("ph").style.display="none";cv.style.display="block";render();};
+  im.onerror=()=>{URL.revokeObjectURL(url);toast(D().err+" (формат?)");};
+  im.src=url;
 }
 
-async function act(ep){
-  try{const r=await fetch(BASE+ep,{method:"POST",credentials:"same-origin"});
-    let j=null; try{j=await r.json();}catch(e){}
-    if(!r.ok||!j){toast(D().err+" "+r.status);return{ok:false};}
-    toast(j.msg||(j.ok?"OK":D().err));return j;}
-  catch(e){toast(D().net);return{ok:false};}
+// ---- обработка целиком в браузере ----
+function floyd(id,useFS,thr){
+  const w=id.width,h=id.height,d=id.data,g=new Float32Array(w*h);
+  for(let i=0;i<w*h;i++)g[i]=0.299*d[i*4]+0.587*d[i*4+1]+0.114*d[i*4+2];
+  if(useFS){
+    for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+      const i=y*w+x,old=g[i],nw=old<128?0:255,err=old-nw;g[i]=nw;
+      if(x+1<w)g[i+1]+=err*7/16;
+      if(y+1<h){if(x>0)g[i+w-1]+=err*3/16;g[i+w]+=err*5/16;if(x+1<w)g[i+w+1]+=err*1/16;}
+    }
+  }else{for(let i=0;i<w*h;i++)g[i]=g[i]>=thr?255:0;}
+  for(let i=0;i<w*h;i++){const v=g[i]<=0?0:(g[i]>=255?255:g[i]);d[i*4]=d[i*4+1]=d[i*4+2]=v;d[i*4+3]=255;}
 }
-$("bSave").addEventListener("click",async()=>{if($("bSave").disabled)return;await act("save");});
+function render(){
+  if(!srcImg)return;
+  const W=SCRW,H=SCRH; let sw=srcImg.naturalWidth,sh=srcImg.naturalHeight,src=srcImg;
+  const rot=parseInt(P.rotate)||0;
+  if(rot){const t=document.createElement("canvas");
+    if(rot===90||rot===270){t.width=sh;t.height=sw;}else{t.width=sw;t.height=sh;}
+    const tc=t.getContext("2d");tc.translate(t.width/2,t.height/2);tc.rotate(rot*Math.PI/180);
+    tc.drawImage(srcImg,-sw/2,-sh/2);src=t;sw=t.width;sh=t.height;}
+  const ctx=cv.getContext("2d",{willReadFrequently:true});
+  ctx.filter="none";ctx.fillStyle="#fff";ctx.fillRect(0,0,W,H);
+  ctx.filter="brightness("+P.brightness+") contrast("+P.contrast+")"+(P.invert==="1"?" invert(1)":"");
+  const fit=P.fit;
+  if(fit==="stretch"){ctx.drawImage(src,0,0,W,H);}
+  else if(fit==="cover"){const s=Math.max(W/sw,H/sh),dw=sw*s,dh=sh*s;ctx.drawImage(src,(W-dw)/2,(H-dh)/2,dw,dh);}
+  else if(fit==="center"){ctx.drawImage(src,(W-sw)/2,(H-sh)/2);}
+  else{const s=Math.min(W/sw,H/sh),dw=sw*s,dh=sh*s;ctx.drawImage(src,(W-dw)/2,(H-dh)/2,dw,dh);}
+  ctx.filter="none";
+  const id=ctx.getImageData(0,0,W,H);floyd(id,P.dither!=="none",parseInt(P.threshold)||128);
+  ctx.putImageData(id,0,0);
+  $("dim").textContent=D().dimDone+" · "+W+"×"+H+" · 1-bit";
+}
+
+// ---- контролы -> мгновенный пере-рендер ----
+document.querySelectorAll(".seg").forEach(seg=>{
+  seg.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
+    seg.querySelectorAll("button").forEach(x=>x.classList.remove("on"));
+    b.classList.add("on");P[seg.dataset.k]=b.dataset.v;render();});
+});
+[["brightness","vbr"],["contrast","vct"],["threshold","vth"]].forEach(([id,lab])=>{
+  $(id).addEventListener("input",()=>{P[id]=$(id).value;$(lab).textContent=$(id).value;render();});
+});
+$("invert").addEventListener("change",()=>{P.invert=$("invert").checked?"1":"0";render();});
+
+// ---- отправка на девайс ----
+async function post(ep,body){
+  try{const r=await fetch(BASE+ep,{method:"POST",body:body,credentials:"same-origin"});
+    let j=null;try{j=await r.json();}catch(e){}
+    if(!r.ok||!j){toast(D().err+" "+r.status);return null;}return j;}
+  catch(e){toast(D().net);return null;}
+}
+function canvasField(){const fd=new FormData();fd.append("logo_b64",cv.toDataURL("image/png"));return fd;}
+
+$("bSave").addEventListener("click",async()=>{if($("bSave").disabled)return;
+  const j=await post("save",canvasField());if(j)toast(j.msg||"OK");});
+
+$("bDev").addEventListener("click",async()=>{
+  if($("bDev").disabled||devCooldown)return;
+  if(!srcImg){toast(D().noimg);return;}
+  devCooldown=true;$("bDev").disabled=true;
+  const j=await post("ondevice",canvasField());if(j)toast(j.msg||"OK");
+  setTimeout(()=>{devCooldown=false;$("bDev").disabled=false;},5000);
+});
+
 $("bInstall").addEventListener("click",async()=>{
-  const j=await act(svc?"uninstall":"install");if(j.ok){svc=!svc;svcLabel();}});
+  const j=await post(svc?"uninstall":"install");if(j&&j.ok){svc=!svc;svcLabel();}
+  if(j)toast(j.msg||"OK");});
 
 applyLang();
 </script></body></html>"""
