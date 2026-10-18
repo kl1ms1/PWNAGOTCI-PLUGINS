@@ -45,8 +45,12 @@ Before=pwnagotchi.service
 
 [Service]
 Type=oneshot
-ExecStart=/usr/bin/python3 {script}
+# жёсткий таймаут: если показ лого завис, он не должен держать загрузку pwnagotchi
+TimeoutStartSec=30
+ExecStart=/usr/bin/timeout 20 /usr/bin/python3 {script}
 RemainAfterExit=no
+# даже если сервис упал/убит по таймауту — это не должно ронять остальную загрузку
+SuccessExitStatus=0 124
 
 [Install]
 WantedBy=multi-user.target
