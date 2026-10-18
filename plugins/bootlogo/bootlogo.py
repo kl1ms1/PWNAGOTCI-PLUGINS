@@ -42,8 +42,8 @@ Before=pwnagotchi.service
 [Service]
 Type=oneshot
 # жёсткий таймаут: если показ лого завис, он не держит загрузку pwnagotchi дольше этого
-TimeoutStartSec=45
-ExecStart=/usr/bin/timeout 40 {python} {script}
+TimeoutStartSec={kill}
+ExecStart=/usr/bin/timeout {tmo} {python} {script}
 RemainAfterExit=no
 SuccessExitStatus=0 124
 
@@ -107,6 +107,9 @@ def main():
         img = img.rotate(rot)
     impl.render(img)
     log("render OK (%dx%d)" % img.size)
+    import time
+    time.sleep({hold})          # держим лого перед стартом pwnagotchi
+    log("held {hold}s")
 
 if __name__ == "__main__":
     try:
@@ -118,7 +121,7 @@ if __name__ == "__main__":
 
 class Bootlogo(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.4.6"
+    __version__ = "0.4.7"
     __license__ = "MIT"
     __description__ = "Кастомное бут-лого: обработка в браузере, показ на экране, бут-сплэш."
 
@@ -236,24 +239,30 @@ class Bootlogo(plugins.Plugin):
     def _service_enabled(self):
         return os.path.exists(_SERVICE_PATH)
 
-    def _install_service(self):
+    def _install_service(self, hold=5):
         import subprocess
         import sys
         try:
+            hold = max(0, min(30, int(hold)))
+            tmo = hold + 20          # timeout на весь скрипт
+            kill = tmo + 5           # systemd TimeoutStartSec
             # ВАЖНО: берём тот же интерпретатор, в котором работает плагин — в нём
             # точно есть модуль pwnagotchi (в /usr/bin/python3 его может не быть).
             python = sys.executable or "/usr/bin/python3"
-            script = _BOOT_SCRIPT.format(logo=self._logo, type=self._display_type or "")
+            script = _BOOT_SCRIPT.format(logo=self._logo,
+                                         type=self._display_type or "", hold=hold)
             script = script.replace("#!/usr/bin/env python3", "#!" + python, 1)
             with open(_BOOT_SCRIPT_PATH, "w") as fh:
                 fh.write(script)
             os.chmod(_BOOT_SCRIPT_PATH, 0o755)
             with open(_SERVICE_PATH, "w") as fh:
-                fh.write(_SERVICE_UNIT.format(script=_BOOT_SCRIPT_PATH, python=python))
+                fh.write(_SERVICE_UNIT.format(script=_BOOT_SCRIPT_PATH, python=python,
+                                              tmo=tmo, kill=kill))
             subprocess.run(["systemctl", "daemon-reload"], check=True)
             subprocess.run(["systemctl", "enable", "pwnagotchi-bootlogo.service"], check=True)
-            logging.info("[bootlogo] boot service installed (python=%s)", python)
-            return True, "Показ при загрузке включён"
+            logging.info("[bootlogo] boot service installed (python=%s, hold=%ss)",
+                         python, hold)
+            return True, "Показ при загрузке включён (держит %s c)" % hold
         except Exception as e:
             logging.exception("[bootlogo] install service failed")
             return False, "Не удалось включить: %s" % e
@@ -305,6 +314,10 @@ class Bootlogo(plugins.Plugin):
                 return jsonify(ok=True, msg="Сохранено как бут-лого ✅")
 
             if action == "ondevice":
+                try:
+                    secs = int(request.args.get("secs", 4))
+                except Exception:
+                    secs = 4
                 if b64:
                     self._to_logo(b64).save(self._preview)
                     src = self._preview
@@ -312,11 +325,15 @@ class Bootlogo(plugins.Plugin):
                     src = self._logo
                 else:
                     return jsonify(ok=False, msg="Нет картинки"), 400
-                ok, msg = self._show_on_device(src, 4)
+                ok, msg = self._show_on_device(src, secs)
                 return jsonify(ok=ok, msg=msg)
 
             if action == "install":
-                ok, msg = self._install_service()
+                try:
+                    hold = int(request.args.get("hold", 5))
+                except Exception:
+                    hold = 5
+                ok, msg = self._install_service(hold)
                 return jsonify(ok=ok, msg=msg)
             if action == "uninstall":
                 ok, msg = self._uninstall_service()
@@ -428,11 +445,15 @@ pointer-events:none;max-width:90vw;text-align:center}
 </div>
 
 <div class="card">
-  <div class="actions">
+  <label><span id="lDur"></span> <span class="val" id="vdur">4</span> c</label>
+  <input id="dur" type="range" min="2" max="10" value="4">
+  <div class="actions" style="margin-top:8px">
     <button class="btn save" id="bSave" disabled></button>
     <button class="btn" id="bDev" disabled></button>
   </div>
-  <div class="actions" style="margin-top:10px"><button class="btn ghost" id="bInstall"></button></div>
+  <label style="margin-top:16px"><span id="lHold"></span> <span class="val" id="vhold">5</span> c</label>
+  <input id="hold" type="range" min="3" max="30" value="5">
+  <div class="actions" style="margin-top:8px"><button class="btn ghost" id="bInstall"></button></div>
   <div class="muted" id="note"></div>
 </div>
 <div class="muted" id="footer"></div>
@@ -455,6 +476,7 @@ const I18N={
   lBw:"Перевод в ч/б",floyd:"Дизеринг",none:"Порог",lRot:"Поворот",
   lBr:"Яркость",lCt:"Контраст",lTh:"Порог ч/б (для «Порога»)",lInv:"Инверсия (негатив)",
   save:"💾 Сохранить как бут-лого",dev:"👁 Показать на экране",
+  lDur:"Длительность показа на экране",lHold:"Держать лого при загрузке",
   svcOn:"⚙️ Включить показ при загрузке",svcOff:"🧹 Выключить показ при загрузке",
   note:"Обработка идёт в браузере. «Показать на экране» выводит картинку на e-ink на ~4 c без перезагрузки.",
   footer:"bootlogo · только для своих устройств 🫡",
@@ -466,6 +488,7 @@ const I18N={
   lBw:"Black & white",floyd:"Dithering",none:"Threshold",lRot:"Rotate",
   lBr:"Brightness",lCt:"Contrast",lTh:"B/W threshold (for «Threshold»)",lInv:"Invert (negative)",
   save:"💾 Save as boot logo",dev:"👁 Show on screen",
+  lDur:"On-screen preview duration",lHold:"Hold logo at boot",
   svcOn:"⚙️ Enable boot splash",svcOff:"🧹 Disable boot splash",
   note:"Processing runs in your browser. «Show on screen» draws it on the e-ink for ~4s, no reboot.",
   footer:"bootlogo · for your own devices only 🫡",
@@ -484,6 +507,7 @@ function applyLang(){
   $("lBr").textContent=d.lBr; $("lCt").textContent=d.lCt; $("lTh").textContent=d.lTh; $("lInv").textContent=d.lInv;
   document.querySelector('[data-k=fit]').querySelectorAll('button').forEach(b=>b.textContent=d[b.dataset.v]);
   document.querySelector('[data-k=dither]').querySelectorAll('button').forEach(b=>b.textContent=d[b.dataset.v]);
+  $("lDur").textContent=d.lDur; $("lHold").textContent=d.lHold;
   $("bSave").textContent=d.save; $("bDev").textContent=d.dev;
   $("note").textContent=d.note; $("footer").textContent=d.footer;
   svcLabel();
@@ -557,14 +581,16 @@ document.querySelectorAll(".seg").forEach(seg=>{
   $(id).addEventListener("input",()=>{P[id]=$(id).value;$(lab).textContent=$(id).value;render();});
 });
 $("invert").addEventListener("change",()=>{P.invert=$("invert").checked?"1":"0";render();});
+$("dur").addEventListener("input",()=>$("vdur").textContent=$("dur").value);
+$("hold").addEventListener("input",()=>$("vhold").textContent=$("hold").value);
 
 // ---- отправка на девайс ----
 // action — в query, картинку шлём сырым телом (не формой) — так надёжнее всего
-async function post(action,withImage){
+async function post(action,withImage,qs){
   const opt={method:"POST",credentials:"same-origin",headers:{"X-CSRFToken":CSRF}};
   if(withImage){opt.body=cv.toDataURL("image/png");
     opt.headers["Content-Type"]="text/plain;charset=UTF-8";}
-  try{const r=await fetch(BASE+"?action="+action,opt);
+  try{const r=await fetch(BASE+"?action="+action+(qs||""),opt);
     let j=null;try{j=await r.json();}catch(e){}
     if(!r.ok||!j){toast(D().err+" "+r.status);return null;}return j;}
   catch(e){toast(D().net);return null;}
@@ -576,13 +602,15 @@ $("bSave").addEventListener("click",async()=>{if($("bSave").disabled)return;
 $("bDev").addEventListener("click",async()=>{
   if($("bDev").disabled||devCooldown)return;
   if(!srcImg){toast(D().noimg);return;}
+  const secs=parseInt($("dur").value)||4;
   devCooldown=true;$("bDev").disabled=true;
-  const j=await post("ondevice",true);if(j)toast(j.msg||"OK");
-  setTimeout(()=>{devCooldown=false;$("bDev").disabled=false;},5000);
+  const j=await post("ondevice",true,"&secs="+secs);if(j)toast(j.msg||"OK");
+  setTimeout(()=>{devCooldown=false;$("bDev").disabled=false;},(secs+1)*1000);
 });
 
 $("bInstall").addEventListener("click",async()=>{
-  const j=await post(svc?"uninstall":"install",false);if(j&&j.ok){svc=!svc;svcLabel();}
+  const qs=svc?"":"&hold="+(parseInt($("hold").value)||5);
+  const j=await post(svc?"uninstall":"install",false,qs);if(j&&j.ok){svc=!svc;svcLabel();}
   if(j)toast(j.msg||"OK");});
 
 applyLang();
