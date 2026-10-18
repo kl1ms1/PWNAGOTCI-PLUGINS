@@ -104,7 +104,7 @@ if __name__ == "__main__":
 
 class Bootlogo(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.4.1"
+    __version__ = "0.4.2"
     __license__ = "MIT"
     __description__ = "Кастомное бут-лого: обработка в браузере, показ на экране, бут-сплэш."
 
@@ -288,11 +288,20 @@ class Bootlogo(plugins.Plugin):
             return jsonify(ok=False, msg=str(e)), 500
 
     def _page(self):
+        # у веб-сервера pwnagotchi включён CSRFProtect — без токена POST = 400.
+        # Генерим токен и вшиваем в страницу; клиент шлёт его заголовком X-CSRFToken.
+        token = ""
+        try:
+            from flask_wtf.csrf import generate_csrf
+            token = generate_csrf()
+        except Exception:
+            token = ""
         return (_APP_HTML
                 .replace("__W__", str(self._w))
                 .replace("__H__", str(self._h))
                 .replace("__SVC__", "1" if self._service_enabled() else "0")
-                .replace("__DISP__", self._display_type or "—"))
+                .replace("__DISP__", self._display_type or "—")
+                .replace("__CSRF__", token))
 
 
 _APP_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
@@ -392,7 +401,7 @@ pointer-events:none;max-width:90vw;text-align:center}
 <div id="toast" class="toast"></div>
 <script>
 const BASE="/plugins/bootlogo/";
-const SCRW=__W__, SCRH=__H__, DISP="__DISP__";
+const SCRW=__W__, SCRH=__H__, DISP="__DISP__", CSRF="__CSRF__";
 let svc=(__SVC__===1), srcImg=null, lang="ru", devCooldown=false;
 const P={fit:"contain",dither:"floyd",rotate:"0",brightness:"1.0",contrast:"1.0",threshold:"128",invert:"0"};
 const $=id=>document.getElementById(id);
@@ -512,9 +521,9 @@ $("invert").addEventListener("change",()=>{P.invert=$("invert").checked?"1":"0";
 // ---- отправка на девайс ----
 // action — в query, картинку шлём сырым телом (не формой) — так надёжнее всего
 async function post(action,withImage){
-  const opt={method:"POST",credentials:"same-origin"};
+  const opt={method:"POST",credentials:"same-origin",headers:{"X-CSRFToken":CSRF}};
   if(withImage){opt.body=cv.toDataURL("image/png");
-    opt.headers={"Content-Type":"text/plain;charset=UTF-8"};}
+    opt.headers["Content-Type"]="text/plain;charset=UTF-8";}
   try{const r=await fetch(BASE+"?action="+action,opt);
     let j=null;try{j=await r.json();}catch(e){}
     if(!r.ok||!j){toast(D().err+" "+r.status);return null;}return j;}
