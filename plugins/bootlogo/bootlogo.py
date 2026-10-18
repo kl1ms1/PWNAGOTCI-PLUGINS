@@ -43,7 +43,7 @@ Before=pwnagotchi.service
 Type=oneshot
 # жёсткий таймаут: если показ лого завис, он не держит загрузку pwnagotchi дольше этого
 TimeoutStartSec=45
-ExecStart=/usr/bin/timeout 40 /usr/bin/python3 {script}
+ExecStart=/usr/bin/timeout 40 {python} {script}
 RemainAfterExit=no
 SuccessExitStatus=0 124
 
@@ -118,7 +118,7 @@ if __name__ == "__main__":
 
 class Bootlogo(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.4.5"
+    __version__ = "0.4.6"
     __license__ = "MIT"
     __description__ = "Кастомное бут-лого: обработка в браузере, показ на экране, бут-сплэш."
 
@@ -238,15 +238,21 @@ class Bootlogo(plugins.Plugin):
 
     def _install_service(self):
         import subprocess
+        import sys
         try:
+            # ВАЖНО: берём тот же интерпретатор, в котором работает плагин — в нём
+            # точно есть модуль pwnagotchi (в /usr/bin/python3 его может не быть).
+            python = sys.executable or "/usr/bin/python3"
             script = _BOOT_SCRIPT.format(logo=self._logo, type=self._display_type or "")
+            script = script.replace("#!/usr/bin/env python3", "#!" + python, 1)
             with open(_BOOT_SCRIPT_PATH, "w") as fh:
                 fh.write(script)
             os.chmod(_BOOT_SCRIPT_PATH, 0o755)
             with open(_SERVICE_PATH, "w") as fh:
-                fh.write(_SERVICE_UNIT.format(script=_BOOT_SCRIPT_PATH))
+                fh.write(_SERVICE_UNIT.format(script=_BOOT_SCRIPT_PATH, python=python))
             subprocess.run(["systemctl", "daemon-reload"], check=True)
             subprocess.run(["systemctl", "enable", "pwnagotchi-bootlogo.service"], check=True)
+            logging.info("[bootlogo] boot service installed (python=%s)", python)
             return True, "Показ при загрузке включён"
         except Exception as e:
             logging.exception("[bootlogo] install service failed")
