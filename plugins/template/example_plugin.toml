@@ -1,0 +1,13 @@
+# Пример конфига плагина.
+# Скопируй нужные строки в /etc/pwnagotchi/config.toml и замени "example" на имя
+# своего плагина (= имя .py файла без расширения).
+
+# путь к кастомным плагинам (один раз на весь config.toml)
+main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
+
+# включение плагина
+main.plugins.example.enabled = true
+
+# любые свои опции — прилетят в self.options["..."]
+main.plugins.example.some_option = "value"
+main.plugins.example.some_number = 42

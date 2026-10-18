@@ -1,1 +1,60 @@
-# PWNAGOTCI-PLUGINS
+# 🐾 pwnagotchi-plugins
+
+Коллекция собственных плагинов для [Pwnagotchi](https://pwnagotchi.org/)
+(тестируется на образе **jayofelony**, Raspberry Pi Zero 2 W).
+
+Делаем не «ещё один uploader», а штуки, которых пока ни у кого нет:
+жесты, гео-профили без GPS, характер, самодиагностика и красивые отчёты.
+
+> ⚠️ **Только по закону.** Всё здесь — для учёбы и работы со **своими** сетями
+> или сетями, на тест которых есть явное письменное разрешение. Перехват чужих
+> рукопожатий и подбор чужих паролей без спроса — незаконно.
+
+---
+
+## 📂 Структура репозитория
+
+```
+pwnagotchi-plugins/
+├── README.md              ← ты здесь
+├── ROADMAP.md             ← банк идей + флагманские фичи
+├── CONTRIBUTING.md        ← как добавить новый плагин (конвенции)
+├── docs/
+│   └── INSTALLING.md      ← как поставить любой плагин на девайс
+└── plugins/
+    ├── README.md          ← индекс готовых плагинов
+    └── template/          ← скелет для старта нового плагина
+        ├── example_plugin.py
+        └── example_plugin.toml
+```
+
+## 🚀 Быстрый старт
+
+1. Скопируй `.py` плагина в папку кастомных плагинов на девайсе:
+   ```bash
+   sudo cp my_plugin.py /usr/local/share/pwnagotchi/custom-plugins/
+   ```
+2. Укажи путь и включи плагин в `/etc/pwnagotchi/config.toml`:
+   ```toml
+   main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
+   main.plugins.my_plugin.enabled = true
+   ```
+3. Перезапусти: `sudo systemctl restart pwnagotchi`.
+
+Подробности и диагностика — в [`docs/INSTALLING.md`](docs/INSTALLING.md).
+
+## 🧩 Плагины
+
+| Плагин | Статус | Что делает |
+|--------|--------|------------|
+| _(пока пусто — пишем первый!)_ | 🏗️ | см. [ROADMAP.md](ROADMAP.md) |
+
+## 💡 Идеи
+
+Банк идей и флагманские фичи — в [`ROADMAP.md`](ROADMAP.md).
+Хочешь добавить свою — просто допиши туда.
+
+## 🤝 Вклад
+
+Как оформлять новый плагин — [`CONTRIBUTING.md`](CONTRIBUTING.md).
+Шаблон для старта лежит в [`plugins/template/`](plugins/template/).
