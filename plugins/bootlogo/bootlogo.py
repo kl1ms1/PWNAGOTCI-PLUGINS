@@ -102,7 +102,7 @@ if __name__ == "__main__":
 
 class Bootlogo(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.2.0"
+    __version__ = "0.3.0"
     __license__ = "MIT"
     __description__ = "Кастомное бут-лого с веб-загрузчиком и авто-обработкой под e-ink."
 
@@ -299,7 +299,7 @@ class Bootlogo(plugins.Plugin):
                 .replace("__DISP__", self._display_type or "—"))
 
 
-_APP_HTML = r"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
+_APP_HTML = r"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>bootlogo</title><style>
 :root{color-scheme:dark;--bg:#0d1117;--card:#161b22;--line:#30363d;--mut:#8b949e;
@@ -308,18 +308,23 @@ _APP_HTML = r"""<!doctype html><html lang="ru"><head><meta charset="utf-8">
 body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);
 margin:0;padding:16px;line-height:1.4}
 .wrap{max-width:560px;margin:0 auto}
+.top{display:flex;align-items:center;justify-content:space-between}
 h1{font-size:1.3rem;margin:.2em 0}
+.lang{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:8px;
+padding:6px 12px;font-size:.8rem;cursor:pointer}
 .sub{color:var(--mut);font-size:.85rem;margin-bottom:12px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0}
 .drop{border:2px dashed var(--line);border-radius:12px;padding:22px;text-align:center;
 color:var(--mut);cursor:pointer;transition:.15s}
 .drop:hover,.drop.hot{border-color:var(--acc);color:var(--fg);background:#0b1b33}
 .stage{display:flex;justify-content:center;margin:4px 0 2px}
-.frame{background:#c9ccd1;border-radius:14px;padding:12px;box-shadow:0 6px 18px #0008;max-width:100%}
+.frame{background:#c9ccd1;border-radius:14px;padding:12px;box-shadow:0 6px 18px #0008;max-width:100%;
+transition:opacity .15s}
+.frame.busy{opacity:.55}
 .screen{background:#fff;border-radius:4px;overflow:hidden;aspect-ratio:__W__/__H__;
 width:min(420px,78vw)}
 .screen img{width:100%;height:100%;display:block;image-rendering:pixelated}
-.ph{display:flex;align-items:center;justify-content:center;height:100%;color:#9aa0a6;font-size:.85rem}
+.ph{display:flex;align-items:center;justify-content:center;height:100%;color:#9aa0a6;font-size:.85rem;text-align:center;padding:8px}
 .dim{text-align:center;color:var(--mut);font-size:.8rem;margin-top:6px}
 label{display:block;font-size:.82rem;color:var(--mut);margin:10px 0 4px}
 .seg{display:flex;gap:6px;flex-wrap:wrap}
@@ -337,129 +342,178 @@ cursor:pointer;color:#fff;background:var(--acc)}
 .btn.save{background:var(--ok)}.btn.ghost{background:#30363d}.btn:disabled{opacity:.5;cursor:default}
 .toast{position:fixed;left:50%;bottom:20px;transform:translateX(-50%);background:#21262d;
 border:1px solid var(--line);padding:10px 16px;border-radius:10px;opacity:0;transition:.25s;
-pointer-events:none;max-width:90vw}
+pointer-events:none;max-width:90vw;text-align:center}
 .toast.show{opacity:1}
-.spin{display:inline-block;width:14px;height:14px;border:2px solid #ffffff55;border-top-color:#fff;
-border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px;margin-right:6px}
-@keyframes s{to{transform:rotate(360deg)}}
 .muted{color:var(--mut);font-size:.78rem;margin-top:10px;text-align:center}
 </style></head><body><div class="wrap">
-<h1>🐾 bootlogo</h1>
-<div class="sub">Экран <b>__W__×__H__</b> · дисплей <code>__DISP__</code></div>
+<div class="top"><h1>🐾 bootlogo</h1><button class="lang" id="langBtn"></button></div>
+<div class="sub" id="sub"></div>
 
 <div class="card">
-  <div id="drop" class="drop">📷 Перетащи фото сюда или нажми, чтобы выбрать</div>
+  <div id="drop" class="drop"></div>
   <input id="file" type="file" accept="image/*" hidden>
-  <div class="stage"><div class="frame"><div class="screen">
+  <div class="stage"><div class="frame" id="frame"><div class="screen">
     <img id="prev" alt="" style="display:none">
-    <div id="ph" class="ph">превью появится здесь</div>
+    <div id="ph" class="ph"></div>
   </div></div></div>
-  <div class="dim" id="dim">предпросмотр как на e-ink</div>
+  <div class="dim" id="dim"></div>
 </div>
 
 <div class="card" id="controls" style="opacity:.5;pointer-events:none">
-  <label>Подгон под экран</label>
+  <label id="lFit"></label>
   <div class="seg" data-k="fit">
-    <button data-v="contain" class="on">Вписать</button>
-    <button data-v="cover">Обрезать</button>
-    <button data-v="stretch">Растянуть</button>
-    <button data-v="center">По центру</button>
+    <button data-v="contain" class="on"></button><button data-v="cover"></button>
+    <button data-v="stretch"></button><button data-v="center"></button>
   </div>
-  <label>Перевод в ч/б</label>
+  <label id="lBw"></label>
   <div class="seg" data-k="dither">
-    <button data-v="floyd" class="on">Дизеринг</button>
-    <button data-v="none">Порог</button>
+    <button data-v="floyd" class="on"></button><button data-v="none"></button>
   </div>
-  <label>Поворот</label>
+  <label id="lRot"></label>
   <div class="seg" data-k="rotate">
     <button data-v="0" class="on">0°</button><button data-v="90">90°</button>
     <button data-v="180">180°</button><button data-v="270">270°</button>
   </div>
   <div class="row">
-    <div><label>Яркость <span class="val" id="vbr">1.0</span></label>
+    <div><label><span id="lBr"></span> <span class="val" id="vbr">1.0</span></label>
       <input id="brightness" type="range" min="0.3" max="2.0" step="0.05" value="1.0"></div>
-    <div><label>Контраст <span class="val" id="vct">1.0</span></label>
+    <div><label><span id="lCt"></span> <span class="val" id="vct">1.0</span></label>
       <input id="contrast" type="range" min="0.3" max="2.5" step="0.05" value="1.0"></div>
   </div>
-  <label>Порог ч/б (для режима «Порог») <span class="val" id="vth">128</span></label>
+  <label><span id="lTh"></span> <span class="val" id="vth">128</span></label>
   <input id="threshold" type="range" min="0" max="255" value="128">
-  <div class="switch"><input id="invert" type="checkbox"><label style="margin:0">Инверсия (негатив)</label></div>
+  <div class="switch"><input id="invert" type="checkbox"><label style="margin:0" id="lInv"></label></div>
 </div>
 
 <div class="card">
-  <div class="actions">
-    <button class="btn save" id="bSave" disabled>💾 Сохранить как бут-лого</button>
-  </div>
-  <div class="actions" style="margin-top:10px">
-    <button class="btn ghost" id="bInstall"></button>
-  </div>
-  <div class="muted">Сохранение не трогает экран. «Показ при загрузке» рисует лого при включении (с таймаутом 20 c).</div>
+  <div class="actions"><button class="btn save" id="bSave" disabled></button></div>
+  <div class="actions" style="margin-top:10px"><button class="btn ghost" id="bInstall"></button></div>
+  <div class="muted" id="note"></div>
 </div>
-<div class="muted">bootlogo · только для своих устройств 🫡</div>
+<div class="muted" id="footer"></div>
 </div>
 
 <div id="toast" class="toast"></div>
 <script>
 const BASE="/plugins/bootlogo/";
-let hasFile=false, svc=(__SVC__===1), busy=false, t=null;
+const SCRW=__W__, SCRH=__H__, DISP="__DISP__";
+let hasFile=false, svc=(__SVC__===1), busy=false, t=null, lastDim="";
 const P={fit:"contain",dither:"floyd",rotate:"0",brightness:"1.0",contrast:"1.0",threshold:"128",invert:"0"};
 const $=id=>document.getElementById(id);
 
+const I18N={
+ ru:{lang:"EN",subScreen:"Экран",subDisplay:"дисплей",
+  drop:"📷 Перетащи фото сюда или нажми, чтобы выбрать",
+  ph:"превью появится здесь",dimDef:"предпросмотр как на e-ink",dimDone:"обработано",
+  lFit:"Подгон под экран",contain:"Вписать",cover:"Обрезать",stretch:"Растянуть",center:"По центру",
+  lBw:"Перевод в ч/б",floyd:"Дизеринг",none:"Порог",lRot:"Поворот",
+  lBr:"Яркость",lCt:"Контраст",lTh:"Порог ч/б (для «Порога»)",lInv:"Инверсия (негатив)",
+  save:"💾 Сохранить как бут-лого",svcOn:"⚙️ Включить показ при загрузке",svcOff:"🧹 Выключить показ при загрузке",
+  note:"Сохранение не трогает экран. «Показ при загрузке» рисует лого при включении (таймаут 20 c).",
+  footer:"bootlogo · только для своих устройств 🫡",
+  net:"Сеть недоступна",err:"Ошибка"},
+ en:{lang:"RU",subScreen:"Screen",subDisplay:"display",
+  drop:"📷 Drop a photo here or tap to choose",
+  ph:"preview will appear here",dimDef:"e-ink preview",dimDone:"processed",
+  lFit:"Fit to screen",contain:"Fit",cover:"Crop",stretch:"Stretch",center:"Center",
+  lBw:"Black & white",floyd:"Dithering",none:"Threshold",lRot:"Rotate",
+  lBr:"Brightness",lCt:"Contrast",lTh:"B/W threshold (for «Threshold»)",lInv:"Invert (negative)",
+  save:"💾 Save as boot logo",svcOn:"⚙️ Enable boot splash",svcOff:"🧹 Disable boot splash",
+  note:"Saving does not touch the screen. «Boot splash» draws the logo at power-on (20s timeout).",
+  footer:"bootlogo · for your own devices only 🫡",
+  net:"Network unavailable",err:"Error"}
+};
+let lang="ru";
+try{lang=localStorage.getItem("bl_lang")||"ru";}catch(e){}
+function D(){return I18N[lang];}
+
+function applyLang(){
+  const d=D();
+  $("langBtn").textContent=d.lang;
+  $("sub").innerHTML=d.subScreen+" <b>"+SCRW+"×"+SCRH+"</b> · "+d.subDisplay+" <code>"+DISP+"</code>";
+  $("drop").textContent=d.drop; $("ph").textContent=d.ph;
+  $("dim").textContent=lastDim?(d.dimDone+" "+lastDim):d.dimDef;
+  $("lFit").textContent=d.lFit; $("lBw").textContent=d.lBw; $("lRot").textContent=d.lRot;
+  $("lBr").textContent=d.lBr; $("lCt").textContent=d.lCt; $("lTh").textContent=d.lTh; $("lInv").textContent=d.lInv;
+  document.querySelector('[data-k=fit]').querySelectorAll('button').forEach(b=>b.textContent=d[b.dataset.v]);
+  document.querySelector('[data-k=dither]').querySelectorAll('button').forEach(b=>b.textContent=d[b.dataset.v]);
+  $("bSave").textContent=d.save; $("note").textContent=d.note; $("footer").textContent=d.footer;
+  svcLabel();
+}
+$("langBtn").addEventListener("click",()=>{lang=(lang==="ru")?"en":"ru";
+  try{localStorage.setItem("bl_lang",lang);}catch(e){} applyLang();});
+
 function toast(m){const e=$("toast");e.textContent=m;e.classList.add("show");
   clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("show"),2600);}
-function svcLabel(){$("bInstall").textContent=svc?"🧹 Выключить показ при загрузке":"⚙️ Включить показ при загрузке";}
+function svcLabel(){$("bInstall").textContent=svc?D().svcOff:D().svcOn;}
+function setBusy(b){$("frame").classList.toggle("busy",b);}
 
-// сегментные кнопки
 document.querySelectorAll(".seg").forEach(seg=>{
   seg.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
     seg.querySelectorAll("button").forEach(x=>x.classList.remove("on"));
     b.classList.add("on");P[seg.dataset.k]=b.dataset.v;process();});
 });
-// ползунки
 [["brightness","vbr"],["contrast","vct"],["threshold","vth"]].forEach(([id,lab])=>{
   $(id).addEventListener("input",()=>{P[id]=$(id).value;$(lab).textContent=$(id).value;debounce();});
 });
 $("invert").addEventListener("change",()=>{P.invert=$("invert").checked?"1":"0";process();});
 
-// загрузка файла
 $("drop").addEventListener("click",()=>$("file").click());
-$("file").addEventListener("change",()=>{if($("file").files[0])process($("file").files[0]);});
+$("file").addEventListener("change",()=>{if($("file").files[0])pick($("file").files[0]);});
 ["dragover","dragenter"].forEach(ev=>$("drop").addEventListener(ev,e=>{e.preventDefault();$("drop").classList.add("hot");}));
 ["dragleave","drop"].forEach(ev=>$("drop").addEventListener(ev,e=>{e.preventDefault();$("drop").classList.remove("hot");}));
-$("drop").addEventListener("drop",e=>{const f=e.dataTransfer.files[0];if(f)process(f);});
+$("drop").addEventListener("drop",e=>{const f=e.dataTransfer.files[0];if(f)pick(f);});
 
 function debounce(){clearTimeout(t);t=setTimeout(()=>process(),250);}
+
+// сжимаем большое фото прямо в браузере — быстро и без лимитов сервера
+function downscale(file){
+  return new Promise(res=>{
+    const url=URL.createObjectURL(file), im=new Image();
+    im.onload=()=>{URL.revokeObjectURL(url);
+      const max=1400; let w=im.naturalWidth,h=im.naturalHeight;
+      if(Math.max(w,h)>max){const s=max/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
+      const c=document.createElement("canvas");c.width=w;c.height=h;
+      c.getContext("2d").drawImage(im,0,0,w,h);
+      c.toBlob(b=>res(b||file),"image/jpeg",0.9);};
+    im.onerror=()=>{URL.revokeObjectURL(url);res(file);};
+    im.src=url;});
+}
+async function pick(file){const b=await downscale(file);process(b);}
 
 async function process(file){
   if(!hasFile && !file) return;
   if(busy){debounce();return;}
-  busy=true;
+  busy=true; setBusy(true);
   const fd=new FormData();
-  if(file) fd.append("image",file);
+  if(file) fd.append("image",file,"upload.jpg");
   for(const k in P) fd.append(k,P[k]);
   try{
-    const r=await fetch(BASE+"process",{method:"POST",body:fd});
-    const j=await r.json();
-    if(!j.ok){toast(j.msg||"Ошибка");busy=false;return;}
+    const r=await fetch(BASE+"process",{method:"POST",body:fd,credentials:"same-origin"});
+    let j=null; try{j=await r.json();}catch(e){}
+    if(!r.ok || !j){toast(D().err+" "+r.status);return finish();}
+    if(!j.ok){toast(j.msg||D().err);return finish();}
     hasFile=true;
     $("controls").style.opacity=1;$("controls").style.pointerEvents="auto";
-    $("bSave").disabled=false;
-    $("ph").style.display="none";
+    $("bSave").disabled=false; $("ph").style.display="none";
     const img=$("prev");img.style.display="block";
     img.src=BASE+"preview.png?ts="+Date.now();
-    $("dim").textContent="обработано "+j.w+"×"+j.h+" · 1-бит";
-  }catch(e){toast("Сеть недоступна");}
-  busy=false;
+    lastDim=j.w+"×"+j.h+" · 1-bit"; $("dim").textContent=D().dimDone+" "+lastDim;
+  }catch(e){toast(D().net);}
+  finish();
+  function finish(){busy=false;setBusy(false);}
 }
 
 async function act(ep){
-  try{const r=await fetch(BASE+ep,{method:"POST"});const j=await r.json();
-    toast(j.msg||(j.ok?"Готово":"Ошибка"));return j;}
-  catch(e){toast("Сеть недоступна");return{ok:false};}
+  try{const r=await fetch(BASE+ep,{method:"POST",credentials:"same-origin"});
+    let j=null; try{j=await r.json();}catch(e){}
+    if(!r.ok||!j){toast(D().err+" "+r.status);return{ok:false};}
+    toast(j.msg||(j.ok?"OK":D().err));return j;}
+  catch(e){toast(D().net);return{ok:false};}
 }
 $("bSave").addEventListener("click",async()=>{if($("bSave").disabled)return;await act("save");});
 $("bInstall").addEventListener("click",async()=>{
   const j=await act(svc?"uninstall":"install");if(j.ok){svc=!svc;svcLabel();}});
 
-svcLabel();
+applyLang();
 </script></body></html>"""
