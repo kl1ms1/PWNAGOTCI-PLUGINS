@@ -102,7 +102,7 @@ if __name__ == "__main__":
 
 class Bootlogo(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.3.0"
+    __version__ = "0.3.1"
     __license__ = "MIT"
     __description__ = "Кастомное бут-лого с веб-загрузчиком и авто-обработкой под e-ink."
 
@@ -150,6 +150,10 @@ class Bootlogo(plugins.Plugin):
     # --- обработка изображения --------------------------------------------
     def _process(self, src_path):
         from PIL import Image, ImageOps, ImageEnhance
+        try:
+            RS = Image.Resampling.LANCZOS   # Pillow >= 9.1
+        except AttributeError:
+            RS = Image.LANCZOS              # старые версии
         W, H = self._w, self._h
         p = self._p
 
@@ -175,9 +179,9 @@ class Bootlogo(plugins.Plugin):
 
         fit = p["fit"]
         if fit == "stretch":
-            g = img.resize((W, H), Image.LANCZOS)
+            g = img.resize((W, H), RS)
         elif fit == "cover":
-            g = ImageOps.fit(img, (W, H), method=Image.LANCZOS, centering=(0.5, 0.5))
+            g = ImageOps.fit(img, (W, H), method=RS, centering=(0.5, 0.5))
         elif fit == "center":
             g = Image.new("L", (W, H), 255)
             left = max(0, (img.width - W) // 2)
@@ -187,7 +191,7 @@ class Bootlogo(plugins.Plugin):
             g.paste(crop, ((W - crop.width) // 2, (H - crop.height) // 2))
         else:  # contain
             im2 = img.copy()
-            im2.thumbnail((W, H), Image.LANCZOS)
+            im2.thumbnail((W, H), RS)
             g = Image.new("L", (W, H), 255)
             g.paste(im2, ((W - im2.width) // 2, (H - im2.height) // 2))
 
@@ -253,6 +257,22 @@ class Bootlogo(plugins.Plugin):
     def _service_enabled(self):
         return os.path.exists(_SERVICE_PATH)
 
+    def _save_upload(self, request):
+        """Принимаем картинку надёжно: сначала base64-поле, затем multipart-файл."""
+        b64 = request.form.get("image_b64") if request.form else None
+        if b64:
+            import base64
+            if "," in b64:
+                b64 = b64.split(",", 1)[1]
+            with open(self._orig, "wb") as fh:
+                fh.write(base64.b64decode(b64))
+            return True
+        up = request.files.get("image") if request.files else None
+        if up and up.filename:
+            up.save(self._orig)
+            return True
+        return False
+
     # --- web API -----------------------------------------------------------
     def on_webhook(self, path, request):
         from flask import send_file, jsonify, abort
@@ -268,9 +288,10 @@ class Bootlogo(plugins.Plugin):
 
             action = (path or "").strip("/")
             if action == "process":
-                up = request.files.get("image") if request.files else None
-                if up and up.filename:
-                    up.save(self._orig)
+                got = self._save_upload(request)
+                logging.info("[bootlogo] process: upload=%s files=%s form=%s",
+                             got, list((request.files or {}).keys()),
+                             list((request.form or {}).keys()))
                 self._read_params(request.form)
                 if not os.path.exists(self._orig):
                     return jsonify(ok=False, msg="Сначала загрузи изображение"), 400
@@ -397,7 +418,7 @@ pointer-events:none;max-width:90vw;text-align:center}
 <script>
 const BASE="/plugins/bootlogo/";
 const SCRW=__W__, SCRH=__H__, DISP="__DISP__";
-let hasFile=false, svc=(__SVC__===1), busy=false, t=null, lastDim="";
+let hasFile=false, svc=(__SVC__===1), busy=false, t=null, lastDim="", curImg="";
 const P={fit:"contain",dither:"floyd",rotate:"0",brightness:"1.0",contrast:"1.0",threshold:"128",invert:"0"};
 const $=id=>document.getElementById(id);
 
@@ -466,27 +487,28 @@ $("drop").addEventListener("drop",e=>{const f=e.dataTransfer.files[0];if(f)pick(
 
 function debounce(){clearTimeout(t);t=setTimeout(()=>process(),250);}
 
-// сжимаем большое фото прямо в браузере — быстро и без лимитов сервера
+// сжимаем фото прямо в браузере в компактный base64 — надёжно парсится сервером
 function downscale(file){
   return new Promise(res=>{
     const url=URL.createObjectURL(file), im=new Image();
     im.onload=()=>{URL.revokeObjectURL(url);
-      const max=1400; let w=im.naturalWidth,h=im.naturalHeight;
+      const max=820; let w=im.naturalWidth,h=im.naturalHeight;
       if(Math.max(w,h)>max){const s=max/Math.max(w,h);w=Math.round(w*s);h=Math.round(h*s);}
       const c=document.createElement("canvas");c.width=w;c.height=h;
       c.getContext("2d").drawImage(im,0,0,w,h);
-      c.toBlob(b=>res(b||file),"image/jpeg",0.9);};
-    im.onerror=()=>{URL.revokeObjectURL(url);res(file);};
+      try{res(c.toDataURL("image/jpeg",0.82));}catch(e){res("");}};
+    im.onerror=()=>{URL.revokeObjectURL(url);
+      const r=new FileReader();r.onload=()=>res(r.result);r.onerror=()=>res("");r.readAsDataURL(file);};
     im.src=url;});
 }
-async function pick(file){const b=await downscale(file);process(b);}
+async function pick(file){curImg=await downscale(file);if(curImg)process(true);else toast(D().err);}
 
-async function process(file){
-  if(!hasFile && !file) return;
+async function process(withImage){
+  if(!hasFile && !withImage) return;
   if(busy){debounce();return;}
   busy=true; setBusy(true);
   const fd=new FormData();
-  if(file) fd.append("image",file,"upload.jpg");
+  if(withImage && curImg) fd.append("image_b64",curImg);
   for(const k in P) fd.append(k,P[k]);
   try{
     const r=await fetch(BASE+"process",{method:"POST",body:fd,credentials:"same-origin"});
