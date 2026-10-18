@@ -104,7 +104,7 @@ if __name__ == "__main__":
 
 class Bootlogo(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.4.3"
+    __version__ = "0.4.4"
     __license__ = "MIT"
     __description__ = "Кастомное бут-лого: обработка в браузере, показ на экране, бут-сплэш."
 
@@ -186,25 +186,35 @@ class Bootlogo(plugins.Plugin):
         if ui is None:
             return False, "Дисплей недоступен"
         impl = getattr(ui, "_implementation", None)
-        ev = getattr(ui, "_canvas_next_event", None)
         lock = getattr(ui, "_lock", None)
-        if impl is None or ev is None or lock is None:
+        if impl is None or lock is None or not hasattr(impl, "render"):
             return False, "Дисплей не поддерживает предпоказ"
         from PIL import Image
         img = Image.open(path).convert("1")
         rot = int(getattr(ui, "_rotation", 0) or 0)
         disp = img if rot == 0 else img.rotate(rot)
+        secs = max(1, min(10, seconds))
+
+        def _clear():
+            try:
+                if hasattr(impl, "clear"):
+                    impl.clear()                 # полный рефреш — убирает «призрак»
+            except Exception:
+                pass
 
         def run():
             try:
                 with lock:
-                    ui._frozen = True            # остановить штатные апдейты UI
-                ui._canvas_next = disp           # отдаём наш кадр
-                ev.set()                         # будим единственный рендер-поток
-                time.sleep(max(1, min(10, seconds)))
+                    ui._frozen = True            # приостановить штатный UI
+                time.sleep(0.8)                  # дать завершиться текущему рендеру
+                # (апдейты заморожены, новых кадров в очереди не появится)
+                _clear()                         # стереть экран начисто
+                impl.render(disp)                # показать нашу картинку
+                time.sleep(secs)
             except Exception:
                 logging.exception("[bootlogo] on-device preview failed")
             finally:
+                _clear()                         # стереть нашу картинку начисто
                 try:
                     ui._frozen = False           # гарантированно разморозить
                 except Exception:
@@ -215,7 +225,7 @@ class Bootlogo(plugins.Plugin):
                     pass
 
         threading.Thread(target=run, name="bootlogo-ondevice", daemon=True).start()
-        return True, "Показываю на экране ~%d c" % seconds
+        return True, "Показываю на экране ~%d c" % secs
 
     # --- бут-сервис --------------------------------------------------------
     def _service_enabled(self):
