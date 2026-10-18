@@ -104,7 +104,7 @@ if __name__ == "__main__":
 
 class Bootlogo(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.4.2"
+    __version__ = "0.4.3"
     __license__ = "MIT"
     __description__ = "Кастомное бут-лого: обработка в браузере, показ на экране, бут-сплэш."
 
@@ -139,14 +139,33 @@ class Bootlogo(plugins.Plugin):
         except Exception:
             pass
         try:
-            self._view = agent.view()
-            im = self._view.image()
-            if im is not None and im.size[0] > 0:
-                self._w, self._h = im.size
+            v = agent.view()           # не на всех сборках есть — ловим ещё и в UI-хуках
+            if v is not None:
+                self._capture_view(v)
         except Exception:
             pass
         logging.info("[bootlogo] ready (display=%s, %dx%d)",
                      self._display_type, self._w, self._h)
+
+    # pwnagotchi сам передаёт сюда объект дисплея (View/Display) — самый надёжный способ
+    def on_ui_setup(self, ui):
+        self._capture_view(ui)
+
+    def on_ui_update(self, ui):
+        if self._view is None:
+            self._capture_view(ui)
+
+    def _capture_view(self, ui):
+        self._view = ui
+        # размер берём из UI только если его не задали в конфиге
+        if self.options and (self.options.get("width") or self.options.get("height")):
+            return
+        try:
+            im = ui.image()
+            if im is not None and im.size[0] > 0:
+                self._w, self._h = im.size
+        except Exception:
+            pass
 
     # --- картинка ----------------------------------------------------------
     def _to_logo(self, b64):
