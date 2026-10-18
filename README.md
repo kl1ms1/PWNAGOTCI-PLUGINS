@@ -41,7 +41,8 @@ pwnagotchi-plugins/
    ```
 3. Перезапусти: `sudo systemctl restart pwnagotchi`.
 
-Подробности и диагностика — в [`docs/INSTALLING.md`](docs/INSTALLING.md).
+📖 Новичку — подробный пошаговый туториал: [`docs/TUTORIAL-SSH.md`](docs/TUTORIAL-SSH.md).
+Кратко и с диагностикой — [`docs/INSTALLING.md`](docs/INSTALLING.md).
 
 ## 🧩 Плагины
 
