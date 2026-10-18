@@ -104,7 +104,7 @@ if __name__ == "__main__":
 
 class Bootlogo(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.4.0"
+    __version__ = "0.4.1"
     __license__ = "MIT"
     __description__ = "Кастомное бут-лого: обработка в браузере, показ на экране, бут-сплэш."
 
@@ -245,8 +245,18 @@ class Bootlogo(plugins.Plugin):
                     return send_file(self._preview, mimetype="image/png")
                 abort(404)
 
-            action = (path or "").strip("/")
-            b64 = request.form.get("logo_b64") if request.form else None
+            # Надёжно, без разбора формы (некоторые сборки pwnagotchi её не парсят):
+            # action — из query-строки или под-адреса; картинка — из сырого тела.
+            action = request.args.get("action") or (path or "").strip("/")
+            try:
+                body = request.get_data(as_text=True) or ""
+            except Exception:
+                body = ""
+            b64 = body if body.strip().startswith("data:") else ""
+            if not action and request.form:          # запасной путь (форма)
+                action = request.form.get("action", "")
+            if not b64 and request.form:
+                b64 = request.form.get("logo_b64", "")
 
             if action == "save":
                 if not b64:
@@ -500,27 +510,30 @@ document.querySelectorAll(".seg").forEach(seg=>{
 $("invert").addEventListener("change",()=>{P.invert=$("invert").checked?"1":"0";render();});
 
 // ---- отправка на девайс ----
-async function post(ep,body){
-  try{const r=await fetch(BASE+ep,{method:"POST",body:body,credentials:"same-origin"});
+// action — в query, картинку шлём сырым телом (не формой) — так надёжнее всего
+async function post(action,withImage){
+  const opt={method:"POST",credentials:"same-origin"};
+  if(withImage){opt.body=cv.toDataURL("image/png");
+    opt.headers={"Content-Type":"text/plain;charset=UTF-8"};}
+  try{const r=await fetch(BASE+"?action="+action,opt);
     let j=null;try{j=await r.json();}catch(e){}
     if(!r.ok||!j){toast(D().err+" "+r.status);return null;}return j;}
   catch(e){toast(D().net);return null;}
 }
-function canvasField(){const fd=new FormData();fd.append("logo_b64",cv.toDataURL("image/png"));return fd;}
 
 $("bSave").addEventListener("click",async()=>{if($("bSave").disabled)return;
-  const j=await post("save",canvasField());if(j)toast(j.msg||"OK");});
+  const j=await post("save",true);if(j)toast(j.msg||"OK");});
 
 $("bDev").addEventListener("click",async()=>{
   if($("bDev").disabled||devCooldown)return;
   if(!srcImg){toast(D().noimg);return;}
   devCooldown=true;$("bDev").disabled=true;
-  const j=await post("ondevice",canvasField());if(j)toast(j.msg||"OK");
+  const j=await post("ondevice",true);if(j)toast(j.msg||"OK");
   setTimeout(()=>{devCooldown=false;$("bDev").disabled=false;},5000);
 });
 
 $("bInstall").addEventListener("click",async()=>{
-  const j=await post(svc?"uninstall":"install");if(j&&j.ok){svc=!svc;svcLabel();}
+  const j=await post(svc?"uninstall":"install",false);if(j&&j.ok){svc=!svc;svcLabel();}
   if(j)toast(j.msg||"OK");});
 
 applyLang();
