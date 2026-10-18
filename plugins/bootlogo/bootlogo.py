@@ -35,15 +35,15 @@ _BOOT_SCRIPT_PATH = "/usr/local/bin/pwnagotchi-bootlogo.py"
 
 _SERVICE_UNIT = """[Unit]
 Description=Pwnagotchi boot logo
-DefaultDependencies=no
-After=local-fs.target
+# без DefaultDependencies=no — чтобы SPI/GPIO и питание дисплея уже были готовы
+After=local-fs.target sysinit.target
 Before=pwnagotchi.service
 
 [Service]
 Type=oneshot
-# жёсткий таймаут: если показ лого завис, он не должен держать загрузку pwnagotchi
-TimeoutStartSec=30
-ExecStart=/usr/bin/timeout 20 /usr/bin/python3 {script}
+# жёсткий таймаут: если показ лого завис, он не держит загрузку pwnagotchi дольше этого
+TimeoutStartSec=45
+ExecStart=/usr/bin/timeout 40 /usr/bin/python3 {script}
 RemainAfterExit=no
 SuccessExitStatus=0 124
 
@@ -53,11 +53,20 @@ WantedBy=multi-user.target
 
 _BOOT_SCRIPT = '''#!/usr/bin/env python3
 """Рисует бут-лого на e-ink до старта pwnagotchi (ставится плагином bootlogo)."""
-import os, logging
+import os, time
 
 CONFIG = "/etc/pwnagotchi/config.toml"
 LOGO = "{logo}"
 FALLBACK_TYPE = "{type}"
+LOG = "/root/.bootlogo/boot.log"
+
+def log(m):
+    try:
+        os.makedirs(os.path.dirname(LOG), exist_ok=True)
+        with open(LOG, "a") as f:
+            f.write("%s %s\\n" % (time.strftime("%H:%M:%S"), m))
+    except Exception:
+        pass
 
 def _load_cfg():
     try:
@@ -72,7 +81,9 @@ def _load_cfg():
             return {{}}
 
 def main():
+    log("--- boot splash start ---")
     if not os.path.exists(LOGO):
+        log("нет файла лого: " + LOGO)
         return
     cfg = _load_cfg()
     disp = cfg.setdefault("ui", {{}}).setdefault("display", {{}})
@@ -81,30 +92,33 @@ def main():
     disp.setdefault("enabled", True)
     disp.setdefault("rotation", 180)
     disp.setdefault("color", "black")
+    log("display type = " + str(disp.get("type")) + ", rotation = " + str(disp.get("rotation")))
     if not disp.get("type"):
+        log("тип дисплея не задан — выход")
         return
     from PIL import Image
     from pwnagotchi.ui import hw
     impl = hw.display_for(cfg)
+    log("driver: " + type(impl).__name__ + " -> initialize()")
     impl.initialize()
     img = Image.open(LOGO).convert("1")
     rot = int(disp.get("rotation", 0) or 0)
     if rot:
         img = img.rotate(rot)
     impl.render(img)
+    log("render OK (%dx%d)" % img.size)
 
 if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        logging.basicConfig()
-        logging.getLogger().error("bootlogo boot script: %s", e)
+        log("ERROR: " + repr(e))
 '''
 
 
 class Bootlogo(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.4.4"
+    __version__ = "0.4.5"
     __license__ = "MIT"
     __description__ = "Кастомное бут-лого: обработка в браузере, показ на экране, бут-сплэш."
 
@@ -186,8 +200,9 @@ class Bootlogo(plugins.Plugin):
         if ui is None:
             return False, "Дисплей недоступен"
         impl = getattr(ui, "_implementation", None)
+        ev = getattr(ui, "_canvas_next_event", None)
         lock = getattr(ui, "_lock", None)
-        if impl is None or lock is None or not hasattr(impl, "render"):
+        if impl is None or ev is None or lock is None:
             return False, "Дисплей не поддерживает предпоказ"
         from PIL import Image
         img = Image.open(path).convert("1")
@@ -195,26 +210,16 @@ class Bootlogo(plugins.Plugin):
         disp = img if rot == 0 else img.rotate(rot)
         secs = max(1, min(10, seconds))
 
-        def _clear():
-            try:
-                if hasattr(impl, "clear"):
-                    impl.clear()                 # полный рефреш — убирает «призрак»
-            except Exception:
-                pass
-
         def run():
             try:
                 with lock:
                     ui._frozen = True            # приостановить штатный UI
-                time.sleep(0.8)                  # дать завершиться текущему рендеру
-                # (апдейты заморожены, новых кадров в очереди не появится)
-                _clear()                         # стереть экран начисто
-                impl.render(disp)                # показать нашу картинку
+                ui._canvas_next = disp           # отдаём наш кадр
+                ev.set()                         # будим штатный рендер-поток
                 time.sleep(secs)
             except Exception:
                 logging.exception("[bootlogo] on-device preview failed")
             finally:
-                _clear()                         # стереть нашу картинку начисто
                 try:
                     ui._frozen = False           # гарантированно разморозить
                 except Exception:
