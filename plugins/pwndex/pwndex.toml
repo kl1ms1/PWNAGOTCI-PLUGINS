@@ -1,0 +1,11 @@
+# Конфиг плагина pwndex. Скопируй нужное в /etc/pwnagotchi/config.toml.
+
+main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
+main.plugins.pwndex.enabled = true
+
+# Каталогизировать ВСЕ видимые сети (seen), а не только пойманные (caught).
+# false = в дексе только сети с пойманным хендшейком.
+main.plugins.pwndex.catalog_seen = true
+
+# Папка хендшейков/потфайла wpa-sec (обычно определяется автоматически):
+# main.plugins.pwndex.handshakes = "/home/pi/handshakes"
