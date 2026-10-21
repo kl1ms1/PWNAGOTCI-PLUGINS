@@ -3,8 +3,9 @@
 main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
 main.plugins.deauth-announcer.enabled = true
 
-# Показывать строку «кого глушу» на e-ink:
-main.plugins.deauth-announcer.show_ui = true
-
-# Позиция строки на экране (x,y) — подбери под свой дисплей:
-main.plugins.deauth-announcer.position = "0,95"
+# Свои фразы (необязательно). {name} подставляется вместо MAC.
+# main.plugins.deauth-announcer.phrases = [
+#   "глушу {name}",
+#   "кикаю {name}",
+#   "{name} — без WiFi!",
+# ]
