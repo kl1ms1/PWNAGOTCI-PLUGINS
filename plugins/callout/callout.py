@@ -49,7 +49,7 @@ def _nice_name(sta):
 
 class Callout(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.3.0"
+    __version__ = "0.4.0"
     __license__ = "MIT"
     __description__ = "pwnagotchi называет жертву деаута по имени, а не по MAC."
 
@@ -59,12 +59,21 @@ class Callout(plugins.Plugin):
         self._phrases = DEFAULT_PHRASES
         self._recent = []
         self._patched = False
+        # для показа фразы на самом экране (e-ink)
+        self._ui = None
+        self._say_text = ""        # что сейчас «говорит» девайс по тесту
+        self._say_until = 0.0      # до какого времени держать на экране
+        self._hold = 6             # секунд держать тест-фразу на экране
 
     def on_loaded(self):
         os.makedirs(self._dir, exist_ok=True)
         o = self.options or {}
         if o.get("phrases"):
             self._phrases = list(o.get("phrases"))
+        try:
+            self._hold = int(o.get("test_seconds", self._hold))
+        except Exception:
+            pass
         self._patch_voice()
         logging.info("[callout] loaded (patched=%s)", self._patched)
 
@@ -115,6 +124,42 @@ class Callout(plugins.Plugin):
         except Exception:
             logging.exception("[callout] on_deauth")
 
+    # --- показ фразы на e-ink ---------------------------------------------
+    # Ловим объект дисплея (view) через UI-хуки — надёжнее, чем agent.view().
+    def on_ui_setup(self, ui):
+        self._ui = ui
+
+    def on_ui_update(self, ui):
+        self._ui = ui
+        # пока активен тест — держим фразу в строке речи, чтобы pwnagotchi
+        # не затёр её своим текстом сразу же.
+        if self._say_text and time.time() < self._say_until:
+            try:
+                ui.set("status", self._say_text)
+                import pwnagotchi.ui.faces as faces
+                face = getattr(faces, "ANGRY", None) or getattr(faces, "INTENSE", None)
+                if face:
+                    ui.set("face", face)
+            except Exception:
+                pass
+        elif self._say_text and time.time() >= self._say_until:
+            self._say_text = ""   # окно показа кончилось
+
+    def _say_on_screen(self, text):
+        """Показать фразу на самом экране (как при настоящем деауте)."""
+        self._say_text = text
+        self._say_until = time.time() + self._hold
+        if self._ui is not None:
+            try:
+                self._ui.set("status", text)
+                import pwnagotchi.ui.faces as faces
+                face = getattr(faces, "ANGRY", None) or getattr(faces, "INTENSE", None)
+                if face:
+                    self._ui.set("face", face)
+                self._ui.update(force=True)
+            except Exception:
+                logging.debug("[callout] не смог вывести на экран")
+
     # --- web --------------------------------------------------------------
     def on_webhook(self, path, request):
         from flask import jsonify, abort
@@ -127,7 +172,8 @@ class Callout(plugins.Plugin):
             sta = random.choice(FAKE)
             sample = random.choice(self._phrases).format(name=_nice_name(sta))
             self._record("ТЕСТ: " + _nice_name(sta), "demo")
-            return jsonify(ok=True, sample=sample)
+            self._say_on_screen(sample)   # показать прямо на e-ink
+            return jsonify(ok=True, sample=sample, shown=self._ui is not None)
         if path in (None, "", "/"):
             return _PAGE
         abort(404)
@@ -173,7 +219,7 @@ async function load(){
 }
 document.getElementById("test").addEventListener("click",async()=>{
   try{const j=await (await fetch(BASE+"?action=test",{credentials:"same-origin"})).json();
-    document.getElementById("sample").textContent="он скажет: "+(j.sample||"");}catch(e){}
+    document.getElementById("sample").textContent=(j.shown?"на экране ▸ ":"он скажет: ")+(j.sample||"");}catch(e){}
   load();
 });
 load(); setInterval(load,5000);

@@ -5,3 +5,6 @@ main.plugins.callout.enabled = true
 
 # Свои фразы (необязательно). {name} = имя устройства:
 # main.plugins.callout.phrases = ["глушу {name}", "кикаю {name}", "{name} — без WiFi!"]
+
+# Сколько секунд держать фразу на экране при нажатии «Тест» (по умолч. 6).
+# main.plugins.callout.test_seconds = 6

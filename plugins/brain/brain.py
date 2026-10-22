@@ -27,20 +27,25 @@ import pwnagotchi.plugins as plugins
 
 HS_REWARD = 10.0          # награда за хендшейк на канале
 TARGET_REWARD = 0.5       # награда за клиента/цель на канале
-FACE = "(A_I)"
+FACE = "(A_I)"            # «лицо» ИИ — показывается вместо обычного в момент решения
 
+# {ch} подставляется выбранными каналами ("1·6·11"). Реплики — с AI/хакерским
+# характером (без рыбацких клише).
 PHRASES = {
-    "decide": ["пересчитываю...", "новая стратегия", "оптимизирую охоту",
-               "корректирую курс", "вектор обновлён", "данные не врут"],
-    "hot":    ["тут движ", "жирный канал", "активность вверх", "цели в зоне", "эфир кипит"],
-    "quiet":  ["эфир спит", "ищу цели...", "разведка", "затаился", "тишина"],
-    "flex":   ["я учусь", "знаю, где ты", "эфир под контролем", "всё просчитано"],
+    "decide": ["меняю тактику → {ch}", "перехожу на {ch}", "вектор смещён на {ch}",
+               "приоритет: {ch}", "курс на {ch}", "захожу на {ch}",
+               "сканирую плотнее {ch}", "перенастраиваю приём на {ch}",
+               "пересчитал — цель {ch}", "смещаю фокус на {ch}"],
+    "hot":    ["{ch} кормит — остаюсь", "жатва на {ch}", "{ch} в топе, качаю",
+               "не ухожу с {ch}", "{ch} — золотая жила", "держу {ch}, тут улов"],
+    "quiet":  ["собираю данные…", "слушаю эфир", "калибруюсь", "учусь на лету",
+               "пока наблюдаю", "разведка эфира", "строю карту каналов"],
 }
 
 
 class Brain(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
     __license__ = "MIT"
     __description__ = "ИИ-агент (bandit): учится и выбирает каналы сканирования."
 
@@ -55,15 +60,19 @@ class Brain(plugins.Plugin):
         self._last_reward = 0.0
         self._last_choice = []
         self._epochs = 0
-        self._phrase = FACE
+        self._phrase = "собираю данные…"   # текущая реплика (для веб-статы)
+        # показ на e-ink
+        self._ui = None
+        self._say_until = 0.0              # до какого времени держим «AI-момент»
+        self._hold = 8                     # секунд держать лицо (A_I) + реплику
         # опции
         self._epsilon = 0.2
         self._top_k = 3
         self._full_every = 10
         self._warmup = 3
         self._alpha = 0.3
-        self._show_face = True
-        self._pos = (0, 83)
+        self._mode = "face"               # face | corner | off
+        self._pos = (0, 83)               # для режима corner
         self._enabled_steer = True
 
     # --- lifecycle ---------------------------------------------------------
@@ -74,7 +83,14 @@ class Brain(plugins.Plugin):
         self._top_k = int(o.get("top_k", self._top_k))
         self._full_every = int(o.get("full_scan_every", self._full_every))
         self._alpha = float(o.get("ewma_alpha", self._alpha))
-        self._show_face = bool(o.get("show_face", True))
+        # режим показа ИИ: face (вместо лица, по умолч.), corner (угол), off
+        self._mode = str(o.get("face_mode", "face")).lower()
+        if o.get("show_face") is False:
+            self._mode = "off"
+        try:
+            self._hold = int(o.get("say_seconds", self._hold))
+        except Exception:
+            pass
         if o.get("channels"):
             try:
                 self._pool = [int(c) for c in o.get("channels")]
@@ -104,7 +120,7 @@ class Brain(plugins.Plugin):
     def on_unload(self, ui):
         self._save()
         try:
-            if self._show_face:
+            if self._mode == "corner":
                 with ui._lock:
                     ui.remove_element("brain")
         except Exception:
@@ -161,9 +177,9 @@ class Brain(plugins.Plugin):
                 e["n"] += 1
         self._epoch_r = {}
 
-        # прогрев: пока мало данных — не вмешиваемся
+        # прогрев: пока мало данных — не вмешиваемся и лицо не трогаем
         if self._epochs <= self._warmup:
-            self._set_phrase("quiet")
+            self._phrase = random.choice(PHRASES["quiet"])
             return
 
         # 2) выбираем каналы
@@ -178,9 +194,10 @@ class Brain(plugins.Plugin):
             except Exception:
                 logging.debug("[brain] set channels failed")
 
-        # 4) реплика + лог
+        # 4) реплика + «AI-момент» на экране + лог
         best = max(self._ch.get(c, {"value": 0})["value"] for c in chosen) if chosen else 0
         self._set_phrase("hot" if best > HS_REWARD * 0.3 else "decide")
+        self._announce()          # лицо (A_I) + речь на e-ink на пару секунд
         self._logline(chosen)
         if self._decisions % 5 == 0:
             self._save()
@@ -213,29 +230,55 @@ class Brain(plugins.Plugin):
 
     # --- e-ink -------------------------------------------------------------
     def _set_phrase(self, kind):
-        txt = random.choice(PHRASES.get(kind, PHRASES["flex"]))
         ch = "·".join(str(c) for c in self._last_choice) if self._last_choice else "…"
-        self._phrase = "%s %s ▸ %s" % (FACE, txt, ch)
+        self._phrase = random.choice(PHRASES.get(kind, PHRASES["decide"])).format(ch=ch)
+
+    def _announce(self):
+        """Открыть «AI-момент»: на _hold секунд показать (A_I) вместо лица + речь."""
+        if self._mode == "off":
+            return
+        self._say_until = time.time() + self._hold
+        if self._ui is not None:
+            try:
+                self._paint(self._ui)
+                self._ui.update(force=True)
+            except Exception:
+                logging.debug("[brain] announce failed")
+
+    def _paint(self, ui):
+        """Нарисовать текущий AI-момент: лицо (A_I) + реплику в строке речи."""
+        ui.set("face", FACE)
+        ui.set("status", self._phrase)
 
     def on_ui_setup(self, ui):
-        if not self._show_face:
-            return
-        try:
-            import pwnagotchi.ui.fonts as fonts
-            from pwnagotchi.ui.components import Text
-            from pwnagotchi.ui.view import BLACK
-            font = getattr(fonts, "Small", None) or fonts.Medium
-            ui.add_element("brain", Text(value=FACE, position=self._pos,
-                                         font=font, color=BLACK))
-        except Exception:
-            logging.exception("[brain] ui setup")
+        self._ui = ui
+        if self._mode == "corner":
+            try:
+                import pwnagotchi.ui.fonts as fonts
+                from pwnagotchi.ui.components import Text
+                from pwnagotchi.ui.view import BLACK
+                font = getattr(fonts, "Small", None) or fonts.Medium
+                ui.add_element("brain", Text(value=FACE, position=self._pos,
+                                             font=font, color=BLACK))
+            except Exception:
+                logging.exception("[brain] ui setup")
 
     def on_ui_update(self, ui):
-        if self._show_face:
+        self._ui = ui
+        if self._mode == "corner":
             try:
-                ui.set("brain", self._phrase)
+                ui.set("brain", "%s %s" % (FACE, self._phrase))
             except Exception:
                 pass
+            return
+        if self._mode == "face":
+            # держим лицо (A_I) + реплику, пока активен «AI-момент»;
+            # по истечении окна — отдаём экран обратно pwnagotchi.
+            if time.time() < self._say_until:
+                try:
+                    self._paint(ui)
+                except Exception:
+                    pass
 
     # --- web ---------------------------------------------------------------
     def on_webhook(self, path, request):
@@ -283,7 +326,7 @@ body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--fg);margi
 const BASE="/plugins/brain/";
 async function load(){
   try{const j=await (await fetch(BASE+"?action=data",{credentials:"same-origin"})).json();
-    document.getElementById("phrase").textContent=j.phrase||"(A_I)";
+    document.getElementById("phrase").textContent="(A_I) "+(j.phrase||"");
     document.getElementById("stats").innerHTML=
       tile(j.decisions,"решений")+tile(j.epochs,"эпох")+tile(j.last_reward,"награда")+tile(j.epsilon,"ε");
     const sel=new Set(j.choice||[]);
