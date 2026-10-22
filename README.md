@@ -51,6 +51,7 @@ pwnagotchi-plugins/
 | [bootlogo](plugins/bootlogo/) | 0.4.7 | ✅ | Кастомное бут-лого: фото в браузере → авто-подгон под e-ink → показ на экране и при включении |
 | [pwndex](plugins/pwndex/) | 0.1.0 | ✅ | «Покедекс» сетей: каталог (SSID/вендор/MAC), поиск, seen/caught, хранилище паролей |
 | [deauth-announcer](plugins/deauth-announcer/) | 0.2.0 | ✅ | Кого глушит — по имени/вендору вместо MAC (e-ink + лог + веб) |
+| [brain](plugins/brain/) | 0.1.0 | ✅ | ИИ-агент (bandit): учится и выбирает каналы сканирования, лицо `(A_I)` |
 
 История версий — в [`CHANGELOG.md`](CHANGELOG.md). Теги/релизы — на вкладке **Releases** репозитория.
 

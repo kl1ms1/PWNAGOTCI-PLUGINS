@@ -1,0 +1,20 @@
+# Конфиг brain. Скопируй нужное в /etc/pwnagotchi/config.toml.
+
+main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
+main.plugins.brain.enabled = true
+
+# Исследование vs эксплуатация (0..1): больше = чаще проверяет новые каналы.
+main.plugins.brain.epsilon = 0.2
+# Сколько лучших каналов держать в фокусе.
+main.plugins.brain.top_k = 3
+# Раз в сколько эпох делать полный скан всех каналов (освежить картину).
+main.plugins.brain.full_scan_every = 10
+
+# Лицо (A_I) и реплики на e-ink:
+main.plugins.brain.show_face = true
+main.plugins.brain.position = "0,83"
+
+# Ограничить пул каналов (необязательно). Пусто = все поддерживаемые.
+# main.plugins.brain.channels = [1, 6, 11]
+
+# Подсказка: лучше всего работает, когда main.personality.channels пуст.
