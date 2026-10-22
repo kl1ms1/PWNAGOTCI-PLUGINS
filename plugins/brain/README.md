@@ -16,8 +16,8 @@ picture). The choice is applied with `agent.run('wifi.recon.channel 1,6,11')` �
 **your config is never rewritten**.
 
 On screen, on a decision, the big face turns into **`(A_I)`** and the speech line
-shows a line with the channel (e.g. "Switching tactics to ch 11."), then the normal
-face comes back. All decisions are logged to `/root/.brain/log.jsonl` (your whole
+shows a line with the channel. The web UI is in English, but **what the device says**
+stays in Russian (e.g. "Меняю тактику → канал 11."), then the normal face comes back. All decisions are logged to `/root/.brain/log.jsonl` (your whole
 strategy history). Web stats + live settings: `http://<ip>:8080/plugins/brain/`.
 
 Rewards are shown as a configurable **currency** (default `$`), so each channel's

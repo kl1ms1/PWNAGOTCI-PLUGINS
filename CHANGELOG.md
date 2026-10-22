@@ -5,8 +5,8 @@ Versions of the plugins in this repository.
 ## callout (formerly deauth-announcer)
 
 ### 0.5.0
-- **English UI** and phrases. Phrases are now proper sentences (capitalized, with a
-  period) and more varied.
+- **English web UI**. The **spoken phrases stay Russian** (that's what the device
+  says), now proper sentences (capitalized, with a period) and more varied.
 - Name resolution prefers the **device name**: `hostname` → `Vendor-XXXX` →
   `Device-XXXX`, instead of just the vendor.
 
@@ -44,7 +44,8 @@ Versions of the plugins in this repository.
 ## brain
 
 ### 0.3.0
-- **English UI** and lines (proper sentences with the channel, e.g. "Switching tactics to ch 11.").
+- **English web UI + settings**. The **spoken lines stay Russian** (proper sentences
+  with the channel, e.g. "Меняю тактику → канал 11.").
 - `(A_I)` now shows **instead of the face** on a decision (configurable `face_mode`,
   shorter default hold).
 - **Web Settings panel**: tweak display time and the reward amounts live; rewards are

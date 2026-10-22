@@ -18,19 +18,19 @@ import time
 
 import pwnagotchi.plugins as plugins
 
-# Phrases are proper sentences: capitalized, with a period, and varied.
-# {name} is the device name.
+# What the device SAYS stays in Russian (only the web UI is English).
+# Proper sentences: capitalized, with a period, and varied. {name} = device name.
 DEFAULT_PHRASES = [
-    "Kicking {name} off.",
-    "Jamming {name}.",
-    "Deauthing {name}.",
-    "Dropping {name} now.",
-    "No WiFi for {name}.",
-    "{name} is out.",
-    "Booting {name} off the air.",
-    "Bye-bye, {name}.",
-    "Pressing F for {name}.",
-    "Cutting {name} loose.",
+    "Глушу {name}.",
+    "Кикаю {name}.",
+    "Отключаю {name}.",
+    "Вырубаю {name}.",
+    "{name} — без WiFi!",
+    "Жму F по {name}.",
+    "Сношу {name} с эфира.",
+    "Пока, {name}.",
+    "Отрубаю {name}.",
+    "{name} отключён.",
 ]
 
 # Demo clients for the Test button (mix of names and vendors).

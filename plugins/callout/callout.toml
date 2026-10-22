@@ -3,8 +3,9 @@
 main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
 main.plugins.callout.enabled = true
 
-# Your own phrases (optional). {name} = device name:
-# main.plugins.callout.phrases = ["Kicking {name} off.", "Jamming {name}.", "No WiFi for {name}."]
+# Your own phrases (optional). The device speaks these; the default set is Russian.
+# {name} = device name:
+# main.plugins.callout.phrases = ["Глушу {name}.", "Кикаю {name}.", "{name} — без WiFi!"]
 
 # How many seconds to hold the phrase on screen when you hit "Test" (default 6).
 # main.plugins.callout.test_seconds = 6

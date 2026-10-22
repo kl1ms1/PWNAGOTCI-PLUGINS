@@ -4,7 +4,10 @@ pwnagotchi calls out the deauth victim **by name**, not by MAC.
 (Formerly `deauth-announcer`.)
 
 - Before: `Kickbanning A4:83:E7:11:22:33!`
-- After: `Kicking Ivan-PC off.`
+- After: `Кикаю Ivan-PC.`
+
+The web UI is in English, but **what the device says** (the spoken phrases) stays in
+Russian by default — set your own via the `phrases` option.
 
 It patches `voice.Voice.on_deauth` **in memory** — the `voice.py` file is left
 untouched, so pwnagotchi updates don't wipe it. There is no extra line on screen —
@@ -33,7 +36,7 @@ sudo systemctl restart pwnagotchi
 | Key | Default | Description |
 |---|---|---|
 | `enabled` | — | turn it on |
-| `phrases` | EN set | your own phrases, `{name}` = device name |
+| `phrases` | RU set | your own phrases, `{name}` = device name |
 | `test_seconds` | `6` | how long the test phrase stays on screen |
 
 > ⚠️ Your own networks / authorized tests only.

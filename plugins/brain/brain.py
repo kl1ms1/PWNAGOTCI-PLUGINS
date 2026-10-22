@@ -28,19 +28,19 @@ import pwnagotchi.plugins as plugins
 
 FACE = "(A_I)"            # the AI "face" — shown instead of the normal one on a decision
 
+# What the device SAYS on the e-ink stays in Russian (only the web UI is English).
 # {ch} is replaced with the chosen channels ("1·6·11"). Proper sentences:
 # capitalized, with a period.
 PHRASES = {
-    "decide": ["Switching tactics to ch {ch}.", "Moving to ch {ch}.",
-               "New vector: ch {ch}.", "Priority is ch {ch}.",
-               "Re-tuning to ch {ch}.", "Locking onto ch {ch}.",
-               "Recalculated — ch {ch}.", "Shifting focus to ch {ch}."],
-    "hot":    ["Ch {ch} is paying off.", "Rich pickings on ch {ch}.",
-               "Staying on ch {ch}.", "Ch {ch} is a goldmine.",
-               "Holding ch {ch}, good haul."],
-    "quiet":  ["Gathering data…", "Listening to the air.", "Calibrating…",
-               "Learning on the fly.", "Scouting for targets.",
-               "Mapping the channels."],
+    "decide": ["Меняю тактику → канал {ch}.", "Перехожу на {ch}.",
+               "Новый вектор: {ch}.", "Приоритет — {ch}.",
+               "Перенастраиваюсь на {ch}.", "Беру на прицел {ch}.",
+               "Пересчитал — цель {ch}.", "Смещаю фокус на {ch}."],
+    "hot":    ["Канал {ch} кормит — остаюсь.", "Жатва на {ch}.",
+               "{ch} в топе, качаю.", "Не ухожу с {ch}.",
+               "{ch} — золотая жила.", "Держу {ch}, тут улов."],
+    "quiet":  ["Собираю данные…", "Слушаю эфир.", "Калибруюсь…",
+               "Учусь на лету.", "Разведка эфира.", "Строю карту каналов."],
 }
 
 
@@ -62,7 +62,7 @@ class Brain(plugins.Plugin):
         self._last_reward = 0.0
         self._last_choice = []
         self._epochs = 0
-        self._phrase = "Gathering data…"   # current line (for the web)
+        self._phrase = "Собираю данные…"   # current spoken line (RU; shown in the web too)
         # e-ink show
         self._ui = None
         self._say_until = 0.0         # until when to hold the "AI moment"
