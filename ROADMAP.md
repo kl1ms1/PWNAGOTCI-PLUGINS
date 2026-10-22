@@ -12,8 +12,10 @@
   См. [plugins/bootlogo](plugins/bootlogo/).
 - ✅ **pwndex** — «покедекс» сетей: веб-каталог AP (SSID/вендор/MAC), поиск, seen/caught,
   хранилище паролей (ручное + авто из wpa-sec). См. [plugins/pwndex](plugins/pwndex/).
-- ✅ **deauth-announcer** — кого глушит по имени/вендору вместо MAC (e-ink + лог + веб).
-  См. [plugins/deauth-announcer](plugins/deauth-announcer/).
+- ✅ **callout** — pwnagotchi говорит имя жертвы деаута вместо MAC (подмена voice в памяти,
+  тест-кнопка, лог, веб). Бывший deauth-announcer. См. [plugins/callout](plugins/callout/).
+- ✅ **pwndex → whitelist** — сети, которым вписан пароль (твои), авто-добавляются в
+  `main.whitelist` в рантайме, чтобы pwnagotchi их не атаковал.
 
 ## 🏗️ В работе / ближайшее (наши хотелки)
 

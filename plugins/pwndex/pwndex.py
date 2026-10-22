@@ -24,7 +24,7 @@ import pwnagotchi.plugins as plugins
 
 class Pwndex(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
     __license__ = "MIT"
     __description__ = "Покедекс сетей: каталог AP (SSID/вендор/MAC), поиск, пароли. Веб-морда."
 
@@ -38,6 +38,8 @@ class Pwndex(plugins.Plugin):
         self._hs_dir = "/home/pi/handshakes"
         self._potfile = None
         self._catalog_seen = True
+        self._agent = None
+        self._auto_wl = True        # сети с паролем -> в whitelist (не атаковать)
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
@@ -46,10 +48,13 @@ class Pwndex(plugins.Plugin):
         self._hs_dir = o.get("handshakes", self._hs_dir)
         if o.get("catalog_seen") is not None:
             self._catalog_seen = bool(o.get("catalog_seen"))
+        if o.get("auto_whitelist") is not None:
+            self._auto_wl = bool(o.get("auto_whitelist"))
         self._load()
         logging.info("[pwndex] loaded, %d entries", len(self._dex))
 
     def on_ready(self, agent):
+        self._agent = agent
         try:
             cfg = agent.config()
             self._hs_dir = cfg["bettercap"].get("handshakes", self._hs_dir)
@@ -57,11 +62,39 @@ class Pwndex(plugins.Plugin):
             pass
         self._potfile = os.path.join(self._hs_dir, "wpa-sec.cracked.potfile")
         self._import_potfile()
+        self._sync_whitelist()
         self._save(force=True)
 
     def on_epoch(self, agent, epoch, epoch_data):
+        self._agent = agent
         self._import_potfile()
+        self._sync_whitelist()
         self._save()
+
+    # --- свои сети (с паролем) -> whitelist, чтобы не атаковать -----------
+    def _sync_whitelist(self):
+        if not self._auto_wl or self._agent is None:
+            return
+        try:
+            cfg = getattr(self._agent, "_config", None)
+            if cfg is None:
+                return
+            wl = cfg.setdefault("main", {}).setdefault("whitelist", [])
+            if not isinstance(wl, list):
+                return
+            added = 0
+            with self._lock:
+                for e in self._dex.values():
+                    if not e.get("pw"):
+                        continue
+                    for v in (e.get("ssid"), (e.get("mac") or "").lower()):
+                        if v and v not in wl:
+                            wl.append(v)
+                            added += 1
+            if added:
+                logging.info("[pwndex] whitelist += %d (свои сети с паролем)", added)
+        except Exception:
+            logging.exception("[pwndex] whitelist sync")
 
     def on_unload(self, ui):
         self._save(force=True)
@@ -269,6 +302,7 @@ class Pwndex(plugins.Plugin):
                         e["note"] = str(body["note"])[:200]
                     self._dirty = True
                 self._save(force=True)
+                self._sync_whitelist()   # вписал пароль -> сеть в whitelist
                 return jsonify(ok=True)
 
             if action == "rescan":

@@ -9,3 +9,6 @@ main.plugins.pwndex.catalog_seen = true
 
 # Папка хендшейков/потфайла wpa-sec (обычно определяется автоматически):
 # main.plugins.pwndex.handshakes = "/home/pi/handshakes"
+
+# Авто-добавление сетей С ПАРОЛЕМ в whitelist (чтобы pwnagotchi их не атаковал):
+main.plugins.pwndex.auto_whitelist = true
