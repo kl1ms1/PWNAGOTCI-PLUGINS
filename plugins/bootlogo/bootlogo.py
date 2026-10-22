@@ -1,16 +1,16 @@
 """
-bootlogo — кастомное бут-лого для Pwnagotchi.
+bootlogo — a custom boot logo for Pwnagotchi.
 
-Веб-морда (http://<ip>:8080/plugins/bootlogo/):
-  • перетащи/выбери фото — вся обработка и превью идут ПРЯМО В БРАУЗЕРЕ (мгновенно,
-    без запросов к девайсу): подгон (вписать/обрезать/растянуть/по центру), дизеринг
-    (Floyd–Steinberg) или порог, инверсия, яркость, контраст, поворот;
-  • 👁 «Показать на экране» — выводит картинку на e-ink на ~4 c без перезагрузки;
-  • 💾 «Сохранить как бут-лого» — на девайс уходит только маленький финальный PNG;
-  • переключатель «Показ при загрузке» (systemd-сервис с таймаутом);
-  • переключатель языка RU/EN.
+Web UI (http://<ip>:8080/plugins/bootlogo/):
+  • drag/choose a photo — all processing and preview happen RIGHT IN THE BROWSER
+    (instant, no round-trips to the device): fit (contain/crop/stretch/center),
+    dithering (Floyd–Steinberg) or threshold, invert, brightness, contrast, rotation;
+  • 👁 "Show on screen" — draws the image on the e-ink for ~4s without a reboot;
+  • 💾 "Save as boot logo" — only the small final PNG goes to the device;
+  • a "Show on boot" toggle (systemd service with a timeout);
+  • an RU/EN language toggle (defaults to EN).
 
-Размер экрана определяется автоматически (по рендеру UI); можно задать width/height.
+Screen size is auto-detected (from the UI render); you can set width/height.
 """
 
 import io
@@ -35,13 +35,13 @@ _BOOT_SCRIPT_PATH = "/usr/local/bin/pwnagotchi-bootlogo.py"
 
 _SERVICE_UNIT = """[Unit]
 Description=Pwnagotchi boot logo
-# без DefaultDependencies=no — чтобы SPI/GPIO и питание дисплея уже были готовы
+# no DefaultDependencies=no — so SPI/GPIO and the display's power are already ready
 After=local-fs.target sysinit.target
 Before=pwnagotchi.service
 
 [Service]
 Type=oneshot
-# жёсткий таймаут: если показ лого завис, он не держит загрузку pwnagotchi дольше этого
+# hard timeout: if drawing the logo hangs, it won't hold up pwnagotchi's boot longer than this
 TimeoutStartSec={kill}
 ExecStart=/usr/bin/timeout {tmo} {python} {script}
 RemainAfterExit=no
@@ -52,7 +52,7 @@ WantedBy=multi-user.target
 """
 
 _BOOT_SCRIPT = '''#!/usr/bin/env python3
-"""Рисует бут-лого на e-ink до старта pwnagotchi (ставится плагином bootlogo)."""
+"""Draws the boot logo on the e-ink before pwnagotchi starts (installed by the bootlogo plugin)."""
 import os, time
 
 CONFIG = "/etc/pwnagotchi/config.toml"
@@ -83,7 +83,7 @@ def _load_cfg():
 def main():
     log("--- boot splash start ---")
     if not os.path.exists(LOGO):
-        log("нет файла лого: " + LOGO)
+        log("no logo file: " + LOGO)
         return
     cfg = _load_cfg()
     disp = cfg.setdefault("ui", {{}}).setdefault("display", {{}})
@@ -94,7 +94,7 @@ def main():
     disp.setdefault("color", "black")
     log("display type = " + str(disp.get("type")) + ", rotation = " + str(disp.get("rotation")))
     if not disp.get("type"):
-        log("тип дисплея не задан — выход")
+        log("display type not set — exit")
         return
     from PIL import Image
     from pwnagotchi.ui import hw
@@ -108,7 +108,7 @@ def main():
     impl.render(img)
     log("render OK (%dx%d)" % img.size)
     import time
-    time.sleep({hold})          # держим лого перед стартом pwnagotchi
+    time.sleep({hold})          # hold the logo before pwnagotchi starts
     log("held {hold}s")
 
 if __name__ == "__main__":
@@ -123,7 +123,7 @@ class Bootlogo(plugins.Plugin):
     __author__ = "you@example.com"
     __version__ = "0.4.7"
     __license__ = "MIT"
-    __description__ = "Кастомное бут-лого: обработка в браузере, показ на экране, бут-сплэш."
+    __description__ = "Custom boot logo: in-browser processing, show on screen, boot splash."
 
     def __init__(self):
         self._w = 250
@@ -156,7 +156,7 @@ class Bootlogo(plugins.Plugin):
         except Exception:
             pass
         try:
-            v = agent.view()           # не на всех сборках есть — ловим ещё и в UI-хуках
+            v = agent.view()           # not on every build — we also catch it in UI hooks
             if v is not None:
                 self._capture_view(v)
         except Exception:
@@ -164,7 +164,7 @@ class Bootlogo(plugins.Plugin):
         logging.info("[bootlogo] ready (display=%s, %dx%d)",
                      self._display_type, self._w, self._h)
 
-    # pwnagotchi сам передаёт сюда объект дисплея (View/Display) — самый надёжный способ
+    # pwnagotchi passes the display object (View/Display) here itself — the most reliable way
     def on_ui_setup(self, ui):
         self._capture_view(ui)
 
@@ -174,7 +174,7 @@ class Bootlogo(plugins.Plugin):
 
     def _capture_view(self, ui):
         self._view = ui
-        # размер берём из UI только если его не задали в конфиге
+        # take the size from the UI only if it wasn't set in the config
         if self.options and (self.options.get("width") or self.options.get("height")):
             return
         try:
@@ -184,9 +184,9 @@ class Bootlogo(plugins.Plugin):
         except Exception:
             pass
 
-    # --- картинка ----------------------------------------------------------
+    # --- image -------------------------------------------------------------
     def _to_logo(self, b64):
-        """base64 (PNG из браузера, уже ч/б) -> PIL '1' точного размера экрана."""
+        """base64 (PNG from the browser, already b/w) -> PIL '1' of the exact screen size."""
         import base64
         from PIL import Image
         if "," in b64:
@@ -194,19 +194,19 @@ class Bootlogo(plugins.Plugin):
         img = Image.open(io.BytesIO(base64.b64decode(b64))).convert("L")
         if img.size != (self._w, self._h):
             img = img.resize((self._w, self._h))
-        # порог, а не дизеринг: картинка уже ч/б, сохраняем как есть
+        # threshold, not dithering: the image is already b/w, keep it as is
         return img.point(lambda v: 255 if v >= 128 else 0, mode="1")
 
     def _show_on_device(self, path, seconds=4):
-        """Показать картинку на e-ink, отдав её в штатный рендер-поток pwnagotchi."""
+        """Show the image on the e-ink by handing it to pwnagotchi's normal render thread."""
         ui = self._view
         if ui is None:
-            return False, "Дисплей недоступен"
+            return False, "Display unavailable"
         impl = getattr(ui, "_implementation", None)
         ev = getattr(ui, "_canvas_next_event", None)
         lock = getattr(ui, "_lock", None)
         if impl is None or ev is None or lock is None:
-            return False, "Дисплей не поддерживает предпоказ"
+            return False, "Display doesn't support preview"
         from PIL import Image
         img = Image.open(path).convert("1")
         rot = int(getattr(ui, "_rotation", 0) or 0)
@@ -216,26 +216,26 @@ class Bootlogo(plugins.Plugin):
         def run():
             try:
                 with lock:
-                    ui._frozen = True            # приостановить штатный UI
-                ui._canvas_next = disp           # отдаём наш кадр
-                ev.set()                         # будим штатный рендер-поток
+                    ui._frozen = True            # pause the normal UI
+                ui._canvas_next = disp           # hand over our frame
+                ev.set()                         # wake the normal render thread
                 time.sleep(secs)
             except Exception:
                 logging.exception("[bootlogo] on-device preview failed")
             finally:
                 try:
-                    ui._frozen = False           # гарантированно разморозить
+                    ui._frozen = False           # guarantee it un-freezes
                 except Exception:
                     pass
                 try:
-                    ui.update(force=True)        # вернуть обычный экран
+                    ui.update(force=True)        # bring the normal screen back
                 except Exception:
                     pass
 
         threading.Thread(target=run, name="bootlogo-ondevice", daemon=True).start()
-        return True, "Показываю на экране ~%d c" % secs
+        return True, "Showing on screen ~%ds" % secs
 
-    # --- бут-сервис --------------------------------------------------------
+    # --- boot service ------------------------------------------------------
     def _service_enabled(self):
         return os.path.exists(_SERVICE_PATH)
 
@@ -246,8 +246,8 @@ class Bootlogo(plugins.Plugin):
             hold = max(0, min(30, int(hold)))
             tmo = hold + 20          # timeout на весь скрипт
             kill = tmo + 5           # systemd TimeoutStartSec
-            # ВАЖНО: берём тот же интерпретатор, в котором работает плагин — в нём
-            # точно есть модуль pwnagotchi (в /usr/bin/python3 его может не быть).
+            # IMPORTANT: use the same interpreter the plugin runs in — it definitely
+            # has the pwnagotchi module (/usr/bin/python3 may not).
             python = sys.executable or "/usr/bin/python3"
             script = _BOOT_SCRIPT.format(logo=self._logo,
                                          type=self._display_type or "", hold=hold)
@@ -262,10 +262,10 @@ class Bootlogo(plugins.Plugin):
             subprocess.run(["systemctl", "enable", "pwnagotchi-bootlogo.service"], check=True)
             logging.info("[bootlogo] boot service installed (python=%s, hold=%ss)",
                          python, hold)
-            return True, "Показ при загрузке включён (держит %s c)" % hold
+            return True, "Boot splash enabled (holds %ss)" % hold
         except Exception as e:
             logging.exception("[bootlogo] install service failed")
-            return False, "Не удалось включить: %s" % e
+            return False, "Couldn't enable: %s" % e
 
     def _uninstall_service(self):
         import subprocess
@@ -276,10 +276,10 @@ class Bootlogo(plugins.Plugin):
                 if os.path.exists(pth):
                     os.remove(pth)
             subprocess.run(["systemctl", "daemon-reload"], check=False)
-            return True, "Показ при загрузке выключен"
+            return True, "Boot splash disabled"
         except Exception as e:
             logging.exception("[bootlogo] uninstall service failed")
-            return False, "Не удалось выключить: %s" % e
+            return False, "Couldn't disable: %s" % e
 
     # --- web API -----------------------------------------------------------
     def on_webhook(self, path, request):
@@ -294,24 +294,24 @@ class Bootlogo(plugins.Plugin):
                     return send_file(self._preview, mimetype="image/png")
                 abort(404)
 
-            # Надёжно, без разбора формы (некоторые сборки pwnagotchi её не парсят):
-            # action — из query-строки или под-адреса; картинка — из сырого тела.
+            # Robust, no form parsing (some pwnagotchi builds don't parse it):
+            # action — from the query string or the sub-path; image — from the raw body.
             action = request.args.get("action") or (path or "").strip("/")
             try:
                 body = request.get_data(as_text=True) or ""
             except Exception:
                 body = ""
             b64 = body if body.strip().startswith("data:") else ""
-            if not action and request.form:          # запасной путь (форма)
+            if not action and request.form:          # fallback (form)
                 action = request.form.get("action", "")
             if not b64 and request.form:
                 b64 = request.form.get("logo_b64", "")
 
             if action == "save":
                 if not b64:
-                    return jsonify(ok=False, msg="Нет картинки"), 400
+                    return jsonify(ok=False, msg="No image"), 400
                 self._to_logo(b64).save(self._logo)
-                return jsonify(ok=True, msg="Сохранено как бут-лого ✅")
+                return jsonify(ok=True, msg="Saved as boot logo ✅")
 
             if action == "ondevice":
                 try:
@@ -324,7 +324,7 @@ class Bootlogo(plugins.Plugin):
                 elif os.path.exists(self._logo):
                     src = self._logo
                 else:
-                    return jsonify(ok=False, msg="Нет картинки"), 400
+                    return jsonify(ok=False, msg="No image"), 400
                 ok, msg = self._show_on_device(src, secs)
                 return jsonify(ok=ok, msg=msg)
 
@@ -345,8 +345,8 @@ class Bootlogo(plugins.Plugin):
             return jsonify(ok=False, msg=str(e)), 500
 
     def _page(self):
-        # у веб-сервера pwnagotchi включён CSRFProtect — без токена POST = 400.
-        # Генерим токен и вшиваем в страницу; клиент шлёт его заголовком X-CSRFToken.
+        # pwnagotchi's web server has CSRFProtect on — a POST without a token = 400.
+        # Generate a token and embed it in the page; the client sends it as X-CSRFToken.
         token = ""
         try:
             from flask_wtf.csrf import generate_csrf
@@ -463,7 +463,7 @@ pointer-events:none;max-width:90vw;text-align:center}
 <script>
 const BASE="/plugins/bootlogo/";
 const SCRW=__W__, SCRH=__H__, DISP="__DISP__", CSRF="__CSRF__";
-let svc=(__SVC__===1), srcImg=null, lang="ru", devCooldown=false;
+let svc=(__SVC__===1), srcImg=null, lang="en", devCooldown=false;
 const P={fit:"contain",dither:"floyd",rotate:"0",brightness:"1.0",contrast:"1.0",threshold:"128",invert:"0"};
 const $=id=>document.getElementById(id);
 const cv=$("cv"); cv.width=SCRW; cv.height=SCRH;
@@ -494,7 +494,7 @@ const I18N={
   footer:"bootlogo · for your own devices only 🫡",
   net:"Network unavailable",err:"Error",noimg:"Load a photo first"}
 };
-try{lang=localStorage.getItem("bl_lang")||"ru";}catch(e){}
+try{lang=localStorage.getItem("bl_lang")||"en";}catch(e){}
 function D(){return I18N[lang];}
 
 function applyLang(){
@@ -519,7 +519,7 @@ function toast(m){const e=$("toast");e.textContent=m;e.classList.add("show");
   clearTimeout(e._t);e._t=setTimeout(()=>e.classList.remove("show"),2600);}
 function svcLabel(){$("bInstall").textContent=svc?D().svcOff:D().svcOn;}
 
-// ---- выбор файла ----
+// ---- file selection ----
 $("drop").addEventListener("click",()=>$("file").click());
 $("file").addEventListener("change",()=>{if($("file").files[0])pick($("file").files[0]);});
 ["dragover","dragenter"].forEach(ev=>$("drop").addEventListener(ev,e=>{e.preventDefault();$("drop").classList.add("hot");}));
@@ -532,11 +532,11 @@ function pick(file){
     $("controls").style.opacity=1;$("controls").style.pointerEvents="auto";
     $("bSave").disabled=false;$("bDev").disabled=false;
     $("ph").style.display="none";cv.style.display="block";render();};
-  im.onerror=()=>{URL.revokeObjectURL(url);toast(D().err+" (формат?)");};
+  im.onerror=()=>{URL.revokeObjectURL(url);toast(D().err+" (format?)");};
   im.src=url;
 }
 
-// ---- обработка целиком в браузере ----
+// ---- all processing in the browser ----
 function floyd(id,useFS,thr){
   const w=id.width,h=id.height,d=id.data,g=new Float32Array(w*h);
   for(let i=0;i<w*h;i++)g[i]=0.299*d[i*4]+0.587*d[i*4+1]+0.114*d[i*4+2];
@@ -571,7 +571,7 @@ function render(){
   $("dim").textContent=D().dimDone+" · "+W+"×"+H+" · 1-bit";
 }
 
-// ---- контролы -> мгновенный пере-рендер ----
+// ---- controls -> instant re-render ----
 document.querySelectorAll(".seg").forEach(seg=>{
   seg.addEventListener("click",e=>{const b=e.target.closest("button");if(!b)return;
     seg.querySelectorAll("button").forEach(x=>x.classList.remove("on"));
@@ -584,8 +584,8 @@ $("invert").addEventListener("change",()=>{P.invert=$("invert").checked?"1":"0";
 $("dur").addEventListener("input",()=>$("vdur").textContent=$("dur").value);
 $("hold").addEventListener("input",()=>$("vhold").textContent=$("hold").value);
 
-// ---- отправка на девайс ----
-// action — в query, картинку шлём сырым телом (не формой) — так надёжнее всего
+// ---- send to the device ----
+// action in the query, the image sent as the raw body (not a form) — most reliable
 async function post(action,withImage,qs){
   const opt={method:"POST",credentials:"same-origin",headers:{"X-CSRFToken":CSRF}};
   if(withImage){opt.body=cv.toDataURL("image/png");

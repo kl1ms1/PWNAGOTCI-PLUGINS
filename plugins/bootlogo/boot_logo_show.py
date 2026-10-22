@@ -1,12 +1,12 @@
 #!/usr/bin/env python3
 """
-Референс boot-скрипта: рисует бут-лого на e-ink до старта pwnagotchi.
+Reference boot script: draws the boot logo on the e-ink before pwnagotchi starts.
 
-Обычно его ставит сама веб-морда плагина (кнопка «Включить показ при загрузке»).
-Этот файл — для ручной установки/правки. Модель дисплея берётся из config.toml
-(ui.display.type), поэтому она должна быть там прописана.
+Normally the plugin's web UI installs it (the "Enable show on boot" button).
+This file is for manual install/editing. The display model is read from config.toml
+(ui.display.type), so it must be set there.
 
-Ручная установка:
+Manual install:
     sudo cp boot_logo_show.py /usr/local/bin/pwnagotchi-bootlogo.py
     sudo chmod +x /usr/local/bin/pwnagotchi-bootlogo.py
     sudo cp pwnagotchi-bootlogo.service /etc/systemd/system/
@@ -39,7 +39,7 @@ def main():
     cfg = _load_cfg()
     disp = cfg.setdefault("ui", {}).setdefault("display", {})
     if not disp.get("type"):
-        logging.getLogger().error("bootlogo: ui.display.type не задан в config.toml")
+        logging.getLogger().error("bootlogo: ui.display.type not set in config.toml")
         return
     disp.setdefault("enabled", True)
     disp.setdefault("rotation", 180)

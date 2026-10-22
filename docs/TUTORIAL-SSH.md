@@ -1,106 +1,106 @@
-# 📖 Туториал: установка плагина через SSH
+# 📖 Tutorial: installing a plugin over SSH
 
-Пошагово, для новичка. На примере плагина **bootlogo**, но **любой плагин из этой
-репы ставится точно так же** — меняется только имя файла и строки в конфиге.
+Step by step, for beginners. Using **bootlogo** as the example, but **every plugin in
+this repo installs exactly the same way** — only the filename and the config lines change.
 
-> Нужно: pwnagotchi включён и подключён к компу по USB. По USB девайс обычно
-> доступен по адресу **10.0.0.2** (логин `pi`, пароль по умолчанию `raspberry`).
+> You need: pwnagotchi powered on and connected to your computer over USB. Over USB the
+> device is usually reachable at **10.0.0.2** (user `pi`, default password `raspberry`).
 
 ---
 
-## Шаг 1. Подключиться по SSH
+## Step 1. Connect over SSH
 
-**Windows / Mac / Linux** — в терминале (на Windows — PowerShell):
+**Windows / Mac / Linux** — in a terminal (on Windows, PowerShell):
 ```bash
 ssh pi@10.0.0.2
 ```
-Первый раз спросит «Are you sure…?» → напиши `yes`. Введи пароль (он не отображается — это нормально).
+The first time it asks "Are you sure…?" → type `yes`. Enter the password (it isn't shown — that's normal).
 
-**С телефона** — приложение вроде *Termius* (iOS/Android): новый host `10.0.0.2`, user `pi`.
+**From a phone** — an app like *Termius* (iOS/Android): new host `10.0.0.2`, user `pi`.
 
 ---
 
-## Шаг 2. Бэкап конфига (на всякий случай)
+## Step 2. Back up the config (just in case)
 ```bash
 sudo cp /etc/pwnagotchi/config.toml /etc/pwnagotchi/config.toml.bak
 ```
 
 ---
 
-## Шаг 3. Скачать плагин на девайс
+## Step 3. Get the plugin onto the device
 
-Если на девайсе есть интернет — качаем прямо из репы:
+If the device has internet — download it straight from the repo:
 ```bash
 sudo mkdir -p /usr/local/share/pwnagotchi/custom-plugins/
 sudo wget -O /usr/local/share/pwnagotchi/custom-plugins/bootlogo.py \
   https://raw.githubusercontent.com/kl1ms1/PWNAGOTCI-PLUGINS/main/plugins/bootlogo/bootlogo.py
 ```
 
-**Нет интернета на девайсе?** Тогда скачай файл на комп и закинь по `scp`
-(команду запускай **на компе**, не внутри SSH):
+**No internet on the device?** Then download the file on your computer and copy it over
+with `scp` (run this **on your computer**, not inside the SSH session):
 ```bash
 scp bootlogo.py pi@10.0.0.2:/tmp/
-# потом обратно в SSH-сессии девайса:
+# then back in the device's SSH session:
 sudo mkdir -p /usr/local/share/pwnagotchi/custom-plugins/
 sudo mv /tmp/bootlogo.py /usr/local/share/pwnagotchi/custom-plugins/
 ```
 
 ---
 
-## Шаг 4. Включить плагин в конфиге
+## Step 4. Enable the plugin in the config
 ```bash
 sudo nano /etc/pwnagotchi/config.toml
 ```
-Добавь строки (для bootlogo):
+Add the lines (for bootlogo):
 ```toml
 main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
 main.plugins.bootlogo.enabled = true
 main.plugins.bootlogo.path = "/root/pwnagotchi-bootlogo.png"
 ```
-Сохранить: **Ctrl+O**, **Enter**, выйти: **Ctrl+X**.
+Save: **Ctrl+O**, **Enter**, exit: **Ctrl+X**.
 
-> `main.custom_plugins` достаточно прописать один раз — для всех кастомных плагинов.
+> `main.custom_plugins` only needs to be set once — for all custom plugins.
 
 ---
 
-## Шаг 5. Перезапустить pwnagotchi
+## Step 5. Restart pwnagotchi
 ```bash
 sudo systemctl restart pwnagotchi
 ```
 
 ---
 
-## Шаг 6. Проверить, что плагин поднялся
+## Step 6. Check that the plugin came up
 ```bash
 sudo journalctl -u pwnagotchi -f | grep -i bootlogo
 ```
-Ищи строку вида `[bootlogo] loaded`. Выйти из лога — **Ctrl+C**.
+Look for a line like `[bootlogo] loaded`. Exit the log with **Ctrl+C**.
 
 ---
 
-## Шаг 7. Открыть веб-морду плагина
-В браузере на компе/телефоне:
+## Step 7. Open the plugin's web UI
+In a browser on your computer/phone:
 ```
 http://10.0.0.2:8080/plugins/bootlogo/
 ```
-Логин/пароль — как у веб-морды pwnagotchi (по умолчанию `changeme` / `changeme`,
-если не менял). Дальше: загрузи фото → покрути настройки → **«Сохранить как бут-лого»**.
+Login/password — same as the pwnagotchi web UI (default `changeme` / `changeme` if you
+haven't changed it). Then: upload a photo → tweak the settings → **"Save as boot logo"**.
 
 ---
 
-## 🧰 Если что-то не так
+## 🧰 If something's wrong
 
-| Симптом | Что делать |
+| Symptom | What to do |
 |---|---|
-| `ssh: connect ... timed out` | девайс не на 10.0.0.2 — проверь USB-подключение / адрес |
-| `Permission denied` при копировании | добавь `sudo` перед командой |
-| веб-страница 404 | проверь `main.custom_plugins` и что файл называется `bootlogo.py` |
-| `plugin not found` в логе | имя файла ≠ имя в конфиге (`bootlogo.py` ↔ `main.plugins.bootlogo`) |
-| сломался конфиг | откат: `sudo cp /etc/pwnagotchi/config.toml.bak /etc/pwnagotchi/config.toml` |
+| `ssh: connect ... timed out` | the device isn't at 10.0.0.2 — check the USB connection / address |
+| `Permission denied` when copying | add `sudo` before the command |
+| web page 404 | check `main.custom_plugins` and that the file is named `bootlogo.py` |
+| `plugin not found` in the log | filename ≠ name in the config (`bootlogo.py` ↔ `main.plugins.bootlogo`) |
+| config broke | roll back: `sudo cp /etc/pwnagotchi/config.toml.bak /etc/pwnagotchi/config.toml` |
 
 ---
 
-## ♻️ Обновить плагин позже
-Просто перекачай свежий файл (Шаг 3) поверх старого и перезапусти (Шаг 5).
+## ♻️ Update a plugin later
+Just re-download the fresh file (Step 3) over the old one and restart (Step 5).
 
-> ⚠️ Только для своих устройств.
+> ⚠️ Your own devices only.

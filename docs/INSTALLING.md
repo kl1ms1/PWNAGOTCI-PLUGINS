@@ -1,21 +1,21 @@
-# 📥 Установка плагина на Pwnagotchi
+# 📥 Installing a plugin on Pwnagotchi
 
-Проверено на образе jayofelony (Raspberry Pi Zero 2 W).
+Tested on the jayofelony image (Raspberry Pi Zero 2 W).
 
-## 1. Скопировать файл на девайс
+## 1. Copy the file to the device
 
-По SSH (по USB девайс обычно на `10.0.0.2`):
+Over SSH (over USB the device is usually at `10.0.0.2`):
 
 ```bash
-# с компа:
-scp plugins/<имя>/<имя>.py pi@10.0.0.2:/tmp/
+# from your computer:
+scp plugins/<name>/<name>.py pi@10.0.0.2:/tmp/
 
-# на девайсе:
+# on the device:
 sudo mkdir -p /usr/local/share/pwnagotchi/custom-plugins/
-sudo mv /tmp/<имя>.py /usr/local/share/pwnagotchi/custom-plugins/
+sudo mv /tmp/<name>.py /usr/local/share/pwnagotchi/custom-plugins/
 ```
 
-## 2. Включить в config.toml
+## 2. Enable it in config.toml
 
 ```bash
 sudo nano /etc/pwnagotchi/config.toml
@@ -23,34 +23,34 @@ sudo nano /etc/pwnagotchi/config.toml
 
 ```toml
 main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
-main.plugins.<имя>.enabled = true
-# + опции плагина, если есть
+main.plugins.<name>.enabled = true
+# + plugin options, if any
 ```
 
-Сохрани: `Ctrl+O`, `Enter`, `Ctrl+X`.
+Save: `Ctrl+O`, `Enter`, `Ctrl+X`.
 
-## 3. Перезапуск и проверка
+## 3. Restart and check
 
 ```bash
 sudo systemctl restart pwnagotchi
-sudo journalctl -u pwnagotchi -f | grep -i <имя>
+sudo journalctl -u pwnagotchi -f | grep -i <name>
 ```
 
-Ищи строку `[<имя>] loaded` (или свою из `on_loaded`).
+Look for a `[<name>] loaded` line (or your own from `on_loaded`).
 
-## 🧰 Диагностика
+## 🧰 Troubleshooting
 
-| Симптом | Причина / что делать |
+| Symptom | Cause / what to do |
 |---|---|
-| `plugin not found` | файл не в `custom_plugins` или имя файла ≠ имени в конфиге |
-| поле осталось «висеть» на экране | в `on_unload` не вызван `ui.remove_element(...)` |
-| `tail: cannot open ...potfile` | не ошибка — файла результатов ещё нет, появится сам |
-| плагину нужен интернет, а его нет | `ping -c3 1.1.1.1`; на одном радио Wi-Fi-клиент + охота несовместимы — нужен USB/BT/второй адаптер |
-| поле не на том месте | подбери `position=(x, y)` под свой дисплей (V2/V3/V4 разные) |
+| `plugin not found` | file isn't in `custom_plugins`, or filename ≠ name in the config |
+| an element stays "stuck" on screen | `ui.remove_element(...)` not called in `on_unload` |
+| `tail: cannot open ...potfile` | not an error — the results file doesn't exist yet, it'll appear |
+| the plugin needs internet but there's none | `ping -c3 1.1.1.1`; on a single radio a Wi-Fi client + hunting are incompatible — you need USB/BT/a second adapter |
+| element in the wrong place | tune `position=(x, y)` for your display (V2/V3/V4 differ) |
 
-## 💾 Бэкап конфига
+## 💾 Back up the config
 
-Перед правками:
+Before editing:
 ```bash
 sudo cp /etc/pwnagotchi/config.toml /etc/pwnagotchi/config.toml.bak
 ```

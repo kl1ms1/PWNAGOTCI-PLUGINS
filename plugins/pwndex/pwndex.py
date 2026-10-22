@@ -33,7 +33,7 @@ class Pwndex(plugins.Plugin):
     def __init__(self):
         self._dir = "/root/.pwndex"
         self._db = os.path.join(self._dir, "dex.json")
-        self._dex = {}                 # mac -> запись
+        self._dex = {}                 # mac -> entry
         self._lock = threading.Lock()
         self._dirty = False
         self._last_save = 0
@@ -101,7 +101,7 @@ class Pwndex(plugins.Plugin):
     def on_unload(self, ui):
         self._save(force=True)
 
-    # --- хранилище ---------------------------------------------------------
+    # --- storage -----------------------------------------------------------
     def _load(self):
         try:
             with open(self._db, encoding="utf-8") as f:
@@ -125,7 +125,7 @@ class Pwndex(plugins.Plugin):
         except Exception:
             logging.exception("[pwndex] save failed")
 
-    # --- каталог -----------------------------------------------------------
+    # --- catalog -----------------------------------------------------------
     @staticmethod
     def _mac(ap):
         m = (ap.get("mac") or ap.get("bssid") or "").upper().replace("-", ":")
@@ -255,7 +255,7 @@ class Pwndex(plugins.Plugin):
                     e["caught"] = True
                     self._dirty = True
 
-    # --- статистика --------------------------------------------------------
+    # --- stats -------------------------------------------------------------
     def _stats(self):
         with self._lock:
             vals = list(self._dex.values())
@@ -283,7 +283,7 @@ class Pwndex(plugins.Plugin):
                         vendors = set()
                         for e in src:
                             it = dict(e)
-                            it["hp"] = bool(it.pop("pcap", ""))   # есть хендшейк
+                            it["hp"] = bool(it.pop("pcap", ""))   # has a handshake
                             if it.get("vendor"):
                                 vendors.add(it["vendor"])
                             items.append(it)
@@ -303,7 +303,7 @@ class Pwndex(plugins.Plugin):
                     return self._page()
                 abort(404)
 
-            # POST — тело JSON (минуя разбор формы), CSRF проверяется сервером
+            # POST — JSON body (bypassing form parsing), CSRF checked by the server
             body = {}
             try:
                 raw = request.get_data(as_text=True)

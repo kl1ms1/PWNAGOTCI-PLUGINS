@@ -1,19 +1,19 @@
 """
-example_plugin — скелет плагина Pwnagotchi.
+example_plugin — a Pwnagotchi plugin skeleton.
 
-Скопируй эту папку, переименуй файл и класс, выпили ненужные хуки — и пиши своё.
-Всё, что лежит под `main.plugins.<имя>.*` в config.toml, прилетает в self.options.
+Copy this folder, rename the file and class, strip the hooks you don't need — and
+write your own. Anything under `main.plugins.<name>.*` in config.toml lands in self.options.
 
-Полезные хуки (бери только нужные):
-    on_loaded()                              — плагин загружен, читаем self.options
-    on_config_changed(config)                — применён конфиг
-    on_ready(agent)                           — железо в monitor mode, bettercap поднят
-    on_ui_setup(ui) / on_ui_update(ui)        — поля на e-ink экране
-    on_unload(ui)                             — выгрузка (снять поля, закрыть ресурсы)
-    on_handshake(agent, filename, ap, cl)     — поймано рукопожатие
-    on_epoch(agent, epoch, epoch_data)        — конец эпохи (раз в несколько секунд)
-    on_internet_available(agent)              — появился интернет (момент для выгрузки)
-    on_webhook(path, request)                 — свои ручки в веб-морде :8080
+Useful hooks (take only what you need):
+    on_loaded()                              — plugin loaded, read self.options
+    on_config_changed(config)                — config applied
+    on_ready(agent)                           — radio in monitor mode, bettercap up
+    on_ui_setup(ui) / on_ui_update(ui)        — elements on the e-ink screen
+    on_unload(ui)                             — unload (remove elements, close resources)
+    on_handshake(agent, filename, ap, cl)     — a handshake was captured
+    on_epoch(agent, epoch, epoch_data)        — end of an epoch (every few seconds)
+    on_internet_available(agent)              — internet appeared (a moment to upload)
+    on_webhook(path, request)                 — your own routes in the web UI on :8080
 """
 
 import logging
@@ -34,9 +34,9 @@ class ExamplePlugin(plugins.Plugin):
         self.ready = False
         self._handshakes = 0
 
-    # --- жизненный цикл ----------------------------------------------------
+    # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
-        # self.options = всё из main.plugins.example.* в config.toml
+        # self.options = everything from main.plugins.example.* in config.toml
         logging.info("[example] loaded, options=%s", self.options)
         self.ready = True
 
@@ -44,12 +44,12 @@ class ExamplePlugin(plugins.Plugin):
         logging.info("[example] unit is ready")
 
     def on_unload(self, ui):
-        # обязательно снимаем свои UI-поля, иначе останутся «висеть»
+        # always remove your UI elements, otherwise they stay "stuck"
         with ui._lock:
             ui.remove_element("example")
         logging.info("[example] unloaded")
 
-    # --- экран e-ink -------------------------------------------------------
+    # --- e-ink screen ------------------------------------------------------
     def on_ui_setup(self, ui):
         ui.add_element(
             "example",
@@ -57,7 +57,7 @@ class ExamplePlugin(plugins.Plugin):
                 color=BLACK,
                 label="ex",
                 value="0",
-                # координаты подбираются под твой дисплей (V2/V3/V4 отличаются)
+                # coordinates depend on your display (V2/V3/V4 differ)
                 position=(0, 95),
                 label_font=fonts.Bold,
                 text_font=fonts.Medium,
@@ -67,7 +67,7 @@ class ExamplePlugin(plugins.Plugin):
     def on_ui_update(self, ui):
         ui.set("example", str(self._handshakes))
 
-    # --- события -----------------------------------------------------------
+    # --- events ------------------------------------------------------------
     def on_handshake(self, agent, filename, access_point, client_station):
         self._handshakes += 1
         ssid = access_point.get("hostname", "?")
@@ -75,11 +75,11 @@ class ExamplePlugin(plugins.Plugin):
                      self._handshakes, ssid, filename)
 
     def on_internet_available(self, agent):
-        # хороший момент, чтобы что-то выгрузить/синхронизировать
+        # a good moment to upload/sync something
         if not self.ready:
             return
         logging.debug("[example] internet is up — place to upload/sync")
 
-    # --- веб-ручка (опционально): GET http://<ip>:8080/plugins/example/ ----
+    # --- web route (optional): GET http://<ip>:8080/plugins/example/ -------
     def on_webhook(self, path, request):
         return "Hello from example plugin 🐾"
