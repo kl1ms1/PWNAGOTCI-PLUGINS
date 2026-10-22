@@ -1,47 +1,58 @@
 # 🧠 brain
 
-ИИ-агент, который **сам выбирает стратегию сканирования**: учится, на каких каналах
-больше улова, и смещает сканирование туда. Без PyTorch и без обученной модели —
-это лёгкий **онлайн-агент (multi-armed bandit)**, учится прямо на девайсе.
+An AI agent that **picks its own scanning strategy**: it learns which channels pay
+off the most and steers scanning there. No PyTorch, no trained model — it's a
+lightweight **online agent (multi-armed bandit)** that learns right on the device.
 
-## Как это работает (просто)
-Каждый канал — «ручка автомата». Агент считает **награду** по каналу:
-- 🏆 пойман хендшейк → большая награда каналу;
-- 📶 на канале есть клиенты/цели → маленькая награда.
+## How it works (in short)
+Each channel is a "slot machine arm". The agent scores a **reward** per channel:
+- 🏆 captured handshake → big reward for that channel;
+- 📶 clients/targets on a channel → small reward.
 
-Раз в эпоху он обновляет «ценность» каждого канала (скользящее среднее) и выбирает,
-куда смотреть дальше: **в основном лучшие** (exploit) + **иногда случайный новый**
-(explore, вероятность `epsilon`) + периодический **полный скан** (освежить картину).
-Выбор применяется командой `agent.run('wifi.recon.channel 1,6,11')` — **твой конфиг не переписывается**.
+Once per epoch it updates each channel's **value** (a moving average) and picks
+where to look next: **mostly the best ones** (exploit) + **sometimes a random new
+one** (explore, probability `epsilon`) + a periodic **full scan** (refresh the
+picture). The choice is applied with `agent.run('wifi.recon.channel 1,6,11')` —
+**your config is never rewritten**.
 
-На экране — лицо **`(A_I)`** и реплики («оптимизирую охоту ▸ 1·6·11»). Логи всех решений
-в `/root/.brain/log.jsonl` (посмотришь всю историю стратегий). Веб-стата с «ценностью»
-каналов: `http://<ip>:8080/plugins/brain/`.
+On screen, on a decision, the big face turns into **`(A_I)`** and the speech line
+shows a line with the channel (e.g. "Switching tactics to ch 11."), then the normal
+face comes back. All decisions are logged to `/root/.brain/log.jsonl` (your whole
+strategy history). Web stats + live settings: `http://<ip>:8080/plugins/brain/`.
 
-## Установка
+Rewards are shown as a configurable **currency** (default `$`), so each channel's
+value reads like how much it "earned".
+
+## Install
 ```bash
 sudo cp brain.py /usr/local/share/pwnagotchi/custom-plugins/
-sudo nano /etc/pwnagotchi/config.toml   # строки из brain.toml (custom_plugins — один раз!)
+sudo nano /etc/pwnagotchi/config.toml   # lines from brain.toml (custom_plugins once!)
 sudo systemctl restart pwnagotchi
 ```
 
-## Опции
-| Ключ | По умолчанию | Описание |
+## Options
+| Key | Default | Description |
 |---|---|---|
-| `enabled` | — | включить |
-| `epsilon` | `0.2` | доля исследования новых каналов |
-| `top_k` | `3` | сколько лучших каналов держать в фокусе |
-| `full_scan_every` | `10` | раз в N эпох — полный скан всех каналов |
-| `show_face` | `true` | лицо `(A_I)` и реплики на e-ink |
-| `position` | `"0,83"` | позиция строки на экране |
-| `channels` | авто | ограничить пул каналов (напр. `[1,6,11]`) |
+| `enabled` | — | turn it on |
+| `epsilon` | `0.2` | share of exploring new channels |
+| `top_k` | `3` | how many of the best channels to keep in focus |
+| `full_scan_every` | `10` | full scan of all channels every N epochs |
+| `face_mode` | `"face"` | `face` (instead of the face), `corner`, or `off` |
+| `say_seconds` | `5` | how long to hold the "AI moment" on screen |
+| `hs_reward` | `10` | reward per captured handshake |
+| `target_reward` | `0.5` | reward per client/target on a channel |
+| `currency` | `"$"` | currency symbol for the web page |
+| `position` | `"0,83"` | line position (corner mode) |
+| `channels` | auto | limit the channel pool (e.g. `[1,6,11]`) |
 
-## Важно / честно
-- Это **кооперативное смещение**, не жёсткий захват: pwnagotchi в своём цикле тоже
-  трогает каналы, поэтому агент **переустанавливает** выбор каждую эпоху. Лучше всего
-  работает, когда `main.personality.channels` пуст (по умолчанию).
-- Первые несколько эпох — **прогрев** (собирает данные), не вмешивается.
-- Лицо `(A_I)` — ASCII, рисуется всегда; **русские реплики** — если на экране «квадратики»,
-  шрифт не держит кириллицу (решим вместе со шрифтом для voice-ru).
+`say_seconds`, `hs_reward`, `target_reward` and `currency` can also be changed
+live from the **⚙️ Settings** panel on the web page (saved to
+`/root/.brain/settings.json`, survives restarts without touching config.toml).
 
-> ⚠️ Только для своих сетей / авторизованных тестов.
+## Honest notes
+- This is a **cooperative nudge**, not a hard takeover: pwnagotchi also touches
+  channels in its own loop, so the agent **re-applies** its choice every epoch.
+  Works best when `main.personality.channels` is empty (default).
+- The first few epochs are **warmup** (gathering data), no interference.
+
+> ⚠️ Your own networks / authorized tests only.

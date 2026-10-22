@@ -1,36 +1,39 @@
 # 📢 callout
 
-pwnagotchi называет жертву деаута **по имени**, а не по MAC.
-(Бывший `deauth-announcer`.)
+pwnagotchi calls out the deauth victim **by name**, not by MAC.
+(Formerly `deauth-announcer`.)
 
-- Было: `Kickbanning A4:83:E7:11:22:33!`
-- Стало: `кикаю Apple`
+- Before: `Kickbanning A4:83:E7:11:22:33!`
+- After: `Kicking Ivan-PC off.`
 
-Подменяет `voice.Voice.on_deauth` **в памяти** — файл `voice.py` не трогается,
-обновления pwnagotchi это не стирают. Лишней строки на экране нет — меняется
-**та самая фраза**, что он произносит.
+It patches `voice.Voice.on_deauth` **in memory** — the `voice.py` file is left
+untouched, so pwnagotchi updates don't wipe it. There is no extra line on screen —
+it changes the **very phrase** pwnagotchi already speaks.
 
-Имя: `hostname` → `vendor` (OUI) → `dev-XXXX` → `устройство`.
+Name resolution prefers the **device name**: `hostname` → `Vendor-XXXX`
+(vendor + last 4 of the MAC) → `Device-XXXX`. The goal is to always show a
+device-looking name, not just the company.
 
-## Веб-морда
+## Web UI
 `http://<ip>:8080/plugins/callout/`
-- **🧪 Тест фразы** — показывает, что он скажет, **не дожидаясь реального деаута**.
-- Список последних целей по имени + лог `/root/.callout/log.txt`.
+- **🧪 Test phrase** — shows what it would say **right on the e-ink**, without
+  waiting for a real deauth (held for a few seconds).
+- A list of recent targets by name + log `/root/.callout/log.txt`.
 
-## Установка
+## Install
 ```bash
 sudo cp callout.py /usr/local/share/pwnagotchi/custom-plugins/
-# если ставил старый deauth-announcer — удали его, чтобы не дублировать:
+# if you installed the old deauth-announcer, remove it so it doesn't double up:
 sudo rm -f /usr/local/share/pwnagotchi/custom-plugins/deauth_announcer.py
-sudo nano /etc/pwnagotchi/config.toml   # main.plugins.callout.enabled = true (и убери deauth-announcer, если был)
+sudo nano /etc/pwnagotchi/config.toml   # main.plugins.callout.enabled = true
 sudo systemctl restart pwnagotchi
 ```
 
-## Опции
-| Ключ | По умолчанию | Описание |
+## Options
+| Key | Default | Description |
 |---|---|---|
-| `enabled` | — | включить |
-| `phrases` | набор RU | свои фразы, `{name}` = имя |
+| `enabled` | — | turn it on |
+| `phrases` | EN set | your own phrases, `{name}` = device name |
+| `test_seconds` | `6` | how long the test phrase stays on screen |
 
-> Если на e-ink «квадратики» вместо русских букв — шрифт не держит кириллицу,
-> задай английские фразы в `phrases`. ⚠️ Только для своих сетей.
+> ⚠️ Your own networks / authorized tests only.

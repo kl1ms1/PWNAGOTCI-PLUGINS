@@ -1,16 +1,18 @@
 """
-pwndex — «покедекс» сетей для Pwnagotchi (только веб-морда).
+pwndex — a "pokedex" of networks for Pwnagotchi (web UI only).
 
-Каталог всех сетей, что видел/поймал девайс:
-  • поиск по SSID / вендору / MAC;
-  • «Seen / Caught» как в покедексе (видел vs поймал хендшейк);
-  • хранилище паролей: вписываешь вручную ИЛИ подтягиваются из wpa-sec; можно подсмотреть;
-  • заметки к сетям.
+A catalog of every network the device has seen/caught:
+  • search by SSID / vendor / MAC;
+  • browse by brand (vendor chips, like a marketplace);
+  • "Seen / Caught" like a pokedex (seen vs. handshake captured);
+  • password store: type it in manually OR pull it from wpa-sec; peek at it;
+  • download the captured handshake (.pcap) per caught network;
+  • networks you give a password to are auto-added to main.whitelist (your own).
 
-Открыть: http://<ip>:8080/plugins/pwndex/
+Open: http://<ip>:8080/plugins/pwndex/
 
-⚠️ Пароли хранятся в открытом виде в /root/.pwndex/dex.json и показываются в веб-морде
-(она под Basic-auth). Только для своих сетей / авторизованных тестов.
+⚠️ Passwords are stored in plain text in /root/.pwndex/dex.json and shown in the web
+UI (which is behind Basic auth). Your own networks / authorized tests only.
 """
 
 import json
@@ -24,9 +26,9 @@ import pwnagotchi.plugins as plugins
 
 class Pwndex(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.3.0"
+    __version__ = "0.4.0"
     __license__ = "MIT"
-    __description__ = "Покедекс сетей: каталог AP (SSID/вендор/MAC), поиск, пароли. Веб-морда."
+    __description__ = "Network pokedex: AP catalog (SSID/vendor/MAC), search, passwords. Web UI."
 
     def __init__(self):
         self._dir = "/root/.pwndex"
@@ -39,7 +41,7 @@ class Pwndex(plugins.Plugin):
         self._potfile = None
         self._catalog_seen = True
         self._agent = None
-        self._auto_wl = True        # сети с паролем -> в whitelist (не атаковать)
+        self._auto_wl = True        # networks with a password -> whitelist (don't attack)
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
@@ -71,7 +73,7 @@ class Pwndex(plugins.Plugin):
         self._sync_whitelist()
         self._save()
 
-    # --- свои сети (с паролем) -> whitelist, чтобы не атаковать -----------
+    # --- your networks (with a password) -> whitelist, don't attack them --
     def _sync_whitelist(self):
         if not self._auto_wl or self._agent is None:
             return
@@ -92,7 +94,7 @@ class Pwndex(plugins.Plugin):
                             wl.append(v)
                             added += 1
             if added:
-                logging.info("[pwndex] whitelist += %d (свои сети с паролем)", added)
+                logging.info("[pwndex] whitelist += %d (your networks with a password)", added)
         except Exception:
             logging.exception("[pwndex] whitelist sync")
 
@@ -145,7 +147,7 @@ class Pwndex(plugins.Plugin):
                      "seen": 0, "caught": False, "pw": "", "note": "", "pcap": ""}
                 self._dex[mac] = e
             if pcap:
-                e["pcap"] = pcap          # путь к пойманному хендшейку (.pcap = «хэш»)
+                e["pcap"] = pcap          # path to the captured handshake (.pcap)
             if ssid and not e.get("ssid"):
                 e["ssid"] = ssid
             if vendor and not e.get("vendor"):
@@ -186,7 +188,7 @@ class Pwndex(plugins.Plugin):
             pass
         self._save()
 
-    # --- пароли из wpa-sec -------------------------------------------------
+    # --- passwords from wpa-sec --------------------------------------------
     @staticmethod
     def _hexmac(s):
         s = (s or "").strip().lower().replace(":", "").replace("-", "")
@@ -205,7 +207,7 @@ class Pwndex(plugins.Plugin):
         return s
 
     def _parse_pot(self, line):
-        """best-effort: (password, mac, ssid) из строки cracked-файла wpa-sec."""
+        """best-effort: (password, mac, ssid) from a wpa-sec cracked-file line."""
         line = line.strip()
         if not line:
             return "", "", ""
@@ -218,7 +220,7 @@ class Pwndex(plugins.Plugin):
                     pw = sep.join(parts[3:]).strip()
                     if pw:
                         return pw, mac, ssid.strip()
-        # hashcat-потфайл "хеш:пароль"
+        # hashcat potfile "hash:password"
         if ":" in line:
             h, _, pw = line.partition(":")
             if pw and len(h) > 20:
@@ -315,14 +317,14 @@ class Pwndex(plugins.Plugin):
                 with self._lock:
                     e = self._dex.get(mac)
                     if e is None:
-                        return jsonify(ok=False, msg="Нет такой записи"), 404
+                        return jsonify(ok=False, msg="No such entry"), 404
                     if "pw" in body:
                         e["pw"] = str(body["pw"])[:128]
                     if "note" in body:
                         e["note"] = str(body["note"])[:200]
                     self._dirty = True
                 self._save(force=True)
-                self._sync_whitelist()   # вписал пароль -> сеть в whitelist
+                self._sync_whitelist()   # password entered -> network to whitelist
                 return jsonify(ok=True)
 
             if action == "rescan":
@@ -359,13 +361,20 @@ h1{font-size:1.3rem;margin:.2em 0}
 .stats{display:flex;gap:8px;flex-wrap:wrap;margin:8px 0 12px}
 .stat{background:var(--card);border:1px solid var(--line);border-radius:10px;padding:8px 12px;font-size:.85rem}
 .stat b{font-size:1.1rem}
-.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px}
+.bar{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:10px;align-items:center}
 input[type=search],input[type=text]{background:#0b0f14;color:var(--fg);border:1px solid var(--line);
 border-radius:9px;padding:9px 12px;font-size:.95rem;width:100%}
 .chips{display:flex;gap:6px;flex-wrap:wrap}
 .chip{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:20px;
 padding:6px 12px;font-size:.82rem;cursor:pointer}
 .chip.on{background:var(--acc);border-color:var(--acc)}
+.brands{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
+.brand{flex:0 0 auto;background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:10px;
+padding:7px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap}
+.brand.on{background:var(--gold);border-color:var(--gold);color:#1a1a1a;font-weight:600}
+.brand .n{color:var(--mut);font-size:.72rem;margin-left:4px}
+.brand.on .n{color:#1a1a1a}
+.lbl-row{font-size:.72rem;color:var(--mut);margin:2px 0 4px}
 .btn{background:#30363d;color:#fff;border:0;border-radius:9px;padding:9px 14px;cursor:pointer;font-size:.85rem}
 .row{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0}
 .row.caught{border-left:3px solid var(--ok)}
@@ -383,23 +392,24 @@ padding:6px 12px;font-size:.82rem;cursor:pointer}
 .fld{margin:6px 0}.fld label{display:block;font-size:.78rem;color:var(--mut);margin-bottom:3px}
 .pwline{display:flex;gap:6px}.pwline input{flex:1}
 .save{background:var(--ok)}
-#vendor{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:.85rem}
-.dl{display:inline-block;margin-top:8px;color:#58a6ff;font-size:.85rem;text-decoration:none}
+.dl{display:inline-block;margin-top:8px;background:#172f1c;color:#7ee2a0;border:1px solid #2ea04366;
+border-radius:8px;padding:7px 12px;font-size:.85rem;text-decoration:none}
 .muted{color:var(--mut);font-size:.78rem;text-align:center;margin-top:14px}
 .empty{color:var(--mut);text-align:center;padding:30px 0}
 </style></head><body><div class="wrap">
 <h1>🎮 pwndex</h1>
 <div class="stats" id="stats"></div>
-<div class="bar"><input type="search" id="q" placeholder="Поиск: SSID, вендор или MAC…"></div>
-<div class="bar"><select id="vendor"><option value="">🏭 все вендоры</option></select></div>
+<div class="bar"><input type="search" id="q" placeholder="Search: SSID, vendor or MAC…"></div>
+<div class="lbl-row">Browse by brand</div>
+<div class="brands" id="brands"></div>
 <div class="bar"><div class="chips" id="filters">
-  <button class="chip on" data-f="all">Все</button>
-  <button class="chip" data-f="caught">🏆 Пойманы</button>
-  <button class="chip" data-f="pw">🔑 С паролем</button>
-  <button class="chip" data-f="seen">👁 Только видел</button>
-</div><button class="btn" id="rescan">↻ Обновить из wpa-sec</button></div>
+  <button class="chip on" data-f="all">All</button>
+  <button class="chip" data-f="caught">🏆 Caught</button>
+  <button class="chip" data-f="pw">🔑 With password</button>
+  <button class="chip" data-f="seen">👁 Seen only</button>
+</div><button class="btn" id="rescan">↻ Refresh from wpa-sec</button></div>
 <div id="list"></div>
-<div class="muted">pwndex · пароли только для своих сетей 🫡</div>
+<div class="muted">pwndex · passwords for your own networks only 🫡</div>
 </div>
 <script>
 const BASE="/plugins/pwndex/", CSRF="__CSRF__";
@@ -408,21 +418,27 @@ let ALL=[], filter="all", q="", vendorFilter="";
 
 function esc(s){return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function fmtAge(t){if(!t)return"";const d=Date.now()/1000-t;
-  if(d<3600)return Math.round(d/60)+"м";if(d<86400)return Math.round(d/3600)+"ч";return Math.round(d/86400)+"д";}
+  if(d<3600)return Math.round(d/60)+"m";if(d<86400)return Math.round(d/3600)+"h";return Math.round(d/86400)+"d";}
 
-function fillVendors(list){
-  const sel=$("#vendor"), cur=sel.value;
-  sel.innerHTML='<option value="">🏭 все вендоры</option>'
-    +(list||[]).map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
-  sel.value=cur;
+function renderBrands(){
+  // count networks per vendor, show as clickable brand chips (marketplace style)
+  const counts={};
+  ALL.forEach(e=>{if(e.vendor)counts[e.vendor]=(counts[e.vendor]||0)+1;});
+  const brands=Object.keys(counts).sort((a,b)=>counts[b]-counts[a]);
+  const box=$("#brands");
+  box.innerHTML='<button class="brand'+(vendorFilter===""?" on":"")+'" data-v="">All brands</button>'
+    +brands.map(v=>'<button class="brand'+(vendorFilter===v?" on":"")+'" data-v="'+esc(v)+'">'
+      +esc(v)+'<span class="n">'+counts[v]+'</span></button>').join("");
+  box.querySelectorAll(".brand").forEach(b=>b.addEventListener("click",()=>{
+    vendorFilter=b.dataset.v; renderBrands(); render();}));
 }
 async function load(){
   try{const r=await fetch(BASE+"?action=data",{credentials:"same-origin"});
-    const j=await r.json();if(!j.ok)return;ALL=j.items||[];fillVendors(j.vendors);renderStats(j.stats);render();}
-  catch(e){$("#list").innerHTML='<div class="empty">Не удалось загрузить</div>';}
+    const j=await r.json();if(!j.ok)return;ALL=j.items||[];renderBrands();renderStats(j.stats);render();}
+  catch(e){$("#list").innerHTML='<div class="empty">Failed to load</div>';}
 }
 function renderStats(s){s=s||{};$("#stats").innerHTML=
-  tile(s.total,"всего")+tile(s.caught,"🏆 пойманы")+tile(s.vendors,"🏭 вендоров")+tile(s.pw,"🔑 паролей");}
+  tile(s.total,"total")+tile(s.caught,"🏆 caught")+tile(s.vendors,"🏭 brands")+tile(s.pw,"🔑 passwords");}
 function tile(v,l){return '<div class="stat"><b>'+(v||0)+'</b> '+l+'</div>';}
 
 function match(e){
@@ -435,25 +451,25 @@ function match(e){
 }
 function render(){
   const items=ALL.filter(match);
-  if(!items.length){$("#list").innerHTML='<div class="empty">Пусто. Полови сети или поменяй фильтр.</div>';return;}
+  if(!items.length){$("#list").innerHTML='<div class="empty">Nothing here. Catch some networks or change the filter.</div>';return;}
   $("#list").innerHTML=items.map(row).join("");
 }
 function row(e){
-  const name=e.ssid?esc(e.ssid):'<span class="hidden">(скрытая)</span>';
+  const name=e.ssid?esc(e.ssid):'<span class="hidden">(hidden)</span>';
   const badge=e.caught?'<span class="badge b-caught">🏆 caught</span>':'<span class="badge b-seen">👁 seen</span>';
   const pwb=e.pw?'<span class="badge b-pw">🔑</span>':'';
   return '<div class="row '+(e.caught?'caught':'seen')+'" data-mac="'+esc(e.mac)+'">'
    +'<div class="head" onclick="toggle(this)">'
    +'<div><div class="ssid">'+name+' '+pwb+'</div>'
    +'<div class="meta">'+esc(e.vendor||"—")+' · '+esc(e.mac)+' · '+esc(e.enc||"?")
-   +' · ch'+(e.ch||"?")+' · '+fmtAge(e.last)+' назад</div></div>'
+   +' · ch'+(e.ch||"?")+' · '+fmtAge(e.last)+' ago</div></div>'
    +badge+'</div>'
    +'<div class="det">'
-   +'<div class="fld"><label>Пароль</label><div class="pwline">'
-   +'<input type="text" class="pw" value="'+esc(e.pw||"")+'" placeholder="нет">'
+   +'<div class="fld"><label>Password</label><div class="pwline">'
+   +'<input type="text" class="pw" value="'+esc(e.pw||"")+'" placeholder="none">'
    +'<button class="btn save" onclick="save(this)">💾</button></div></div>'
-   +'<div class="fld"><label>Заметка</label><input type="text" class="note" value="'+esc(e.note||"")+'" placeholder="—"></div>'
-   +(e.hp?'<a class="dl" href="'+BASE+'?action=pcap&mac='+encodeURIComponent(e.mac)+'">⬇ скачать хэш (.pcap)</a>':'')
+   +'<div class="fld"><label>Note</label><input type="text" class="note" value="'+esc(e.note||"")+'" placeholder="—"></div>'
+   +(e.hp?'<a class="dl" href="'+BASE+'?action=pcap&mac='+encodeURIComponent(e.mac)+'">⬇ Download .pcap (handshake)</a>':'')
    +'</div></div>';
 }
 function toggle(h){h.parentElement.querySelector(".det").classList.toggle("open");}
@@ -470,7 +486,6 @@ async function save(btn){
   catch(e){btn.textContent="✗";setTimeout(()=>btn.textContent="💾",1200);}
 }
 $("#q").addEventListener("input",()=>{q=$("#q").value.toLowerCase().trim();render();});
-$("#vendor").addEventListener("change",()=>{vendorFilter=$("#vendor").value;render();});
 document.querySelectorAll("#filters .chip").forEach(c=>c.addEventListener("click",()=>{
   document.querySelectorAll("#filters .chip").forEach(x=>x.classList.remove("on"));
   c.classList.add("on");filter=c.dataset.f;render();}));
@@ -478,6 +493,6 @@ $("#rescan").addEventListener("click",async()=>{
   $("#rescan").textContent="…";
   try{await fetch(BASE+"?action=rescan",{method:"POST",credentials:"same-origin",headers:{"X-CSRFToken":CSRF}});}
   catch(e){}
-  await load();$("#rescan").textContent="↻ Обновить из wpa-sec";});
+  await load();$("#rescan").textContent="↻ Refresh from wpa-sec";});
 load();
 </script></body></html>"""

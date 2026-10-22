@@ -1,35 +1,44 @@
 # 🎮 pwndex
 
-«Покедекс» сетей для Pwnagotchi — **только веб-морда**: каталог всех сетей, что девайс
-видел и ловил, с поиском, статусом **seen/caught** и **хранилищем паролей**.
+A "pokedex" of networks for Pwnagotchi — **web UI only**: a catalog of every
+network the device has seen and caught, with search, **seen/caught** status and a
+**password store**.
 
-Открыть: `http://<ip>:8080/plugins/pwndex/`
+Open: `http://<ip>:8080/plugins/pwndex/`
 
-## Что умеет
-- **Каталог сетей**: SSID, вендор, MAC, шифрование, канал, когда видели в последний раз.
-- **Seen / Caught** — как в покедексе: 👁 просто видел vs 🏆 поймал хендшейк.
-- **Поиск** по SSID / вендору / MAC (мгновенный) + фильтры (все / пойманы / с паролем / только видел).
-- **Пароли**: вписываешь вручную ИЛИ подтягиваются из `wpa-sec.cracked.potfile`
-  (кнопка «↻ Обновить из wpa-sec»); потом можно подсмотреть. Плюс заметки к сетям.
-- Статистика сверху: всего / пойманы / вендоров / паролей.
+## What it does
+- **Network catalog**: SSID, vendor, MAC, encryption, channel, last seen.
+- **Seen / Caught** like a pokedex: 👁 just seen vs 🏆 handshake captured.
+- **Search** by SSID / vendor / MAC (instant) + filters (all / caught / with
+  password / seen only).
+- **Browse by brand**: clickable vendor chips (Xiaomi, TP-Link, Apple…), like a
+  marketplace — each shows how many networks that brand has.
+- **Passwords**: type them in manually OR pull them from `wpa-sec.cracked.potfile`
+  (the "↻ Refresh from wpa-sec" button); peek at them later. Plus per-network notes.
+- **Download .pcap**: for caught networks, grab the captured handshake file right
+  from the entry.
+- **Auto-whitelist**: networks you give a password to (your own) are auto-added to
+  `main.whitelist`, so pwnagotchi won't attack them.
+- Stats on top: total / caught / brands / passwords.
 
-## Установка
+## Install
 ```bash
 sudo cp pwndex.py /usr/local/share/pwnagotchi/custom-plugins/
-sudo nano /etc/pwnagotchi/config.toml   # добавь строки из pwndex.toml (custom_plugins — один раз!)
+sudo nano /etc/pwnagotchi/config.toml   # add the lines from pwndex.toml (custom_plugins once!)
 sudo systemctl restart pwnagotchi
 ```
-Подробно — [../../docs/TUTORIAL-SSH.md](../../docs/TUTORIAL-SSH.md).
+Step by step — [../../docs/TUTORIAL-SSH.md](../../docs/TUTORIAL-SSH.md).
 
-## Опции (config.toml)
-| Ключ | По умолчанию | Описание |
+## Options (config.toml)
+| Key | Default | Description |
 |---|---|---|
-| `enabled` | — | включить плагин |
-| `catalog_seen` | `true` | каталогизировать все видимые сети, не только пойманные |
-| `handshakes` | авто | папка хендшейков/потфайла wpa-sec |
+| `enabled` | — | turn the plugin on |
+| `catalog_seen` | `true` | catalog all visible networks, not just caught ones |
+| `auto_whitelist` | `true` | networks with a password → whitelist (don't attack) |
+| `handshakes` | auto | wpa-sec handshakes/potfile folder |
 
-## Где хранится
-`/root/.pwndex/dex.json` — каталог и пароли (в открытом виде).
+## Where it's stored
+`/root/.pwndex/dex.json` — the catalog and passwords (in plain text).
 
-> ⚠️ Пароли лежат в открытом виде на карте и показываются в веб-морде (она под Basic-auth).
-> Только для своих сетей / авторизованных тестов.
+> ⚠️ Passwords sit in plain text on the card and are shown in the web UI (which is
+> behind Basic auth). Your own networks / authorized tests only.

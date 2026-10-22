@@ -1,73 +1,89 @@
 # Changelog
 
-Версии плагинов этого репозитория.
+Versions of the plugins in this repository.
 
-## callout (бывший deauth-announcer)
+## callout (formerly deauth-announcer)
+
+### 0.5.0
+- **English UI** and phrases. Phrases are now proper sentences (capitalized, with a
+  period) and more varied.
+- Name resolution prefers the **device name**: `hostname` → `Vendor-XXXX` →
+  `Device-XXXX`, instead of just the vendor.
 
 ### 0.4.0
-- Кнопка **«Тест фразы»** теперь выводит фразу **на сам экран** (e-ink), а не только в браузер —
-  видно, как pwnagotchi «говорит», не дожидаясь реального деаута. Длительность — опция `test_seconds`.
+- The **"Test phrase"** button now shows the phrase **on the screen itself** (e-ink),
+  not just in the browser. Duration via the `test_seconds` option.
 
 ### 0.3.0
-- Переименован в **callout**; добавлена кнопка **«Тест фразы»** в веб-морде (не ждать деаута).
+- Renamed to **callout**; added a **"Test phrase"** button in the web UI.
 
-### 0.2.0 (как deauth-announcer)
-- Подмена `voice.on_deauth` в памяти: pwnagotchi говорит имя вместо MAC.
+### 0.2.0 (as deauth-announcer)
+- Patches `voice.on_deauth` in memory: pwnagotchi says the name instead of the MAC.
 
 ### 0.1.0
-- Первый вариант (строка на e-ink).
+- First version (a line on the e-ink).
 
 ## pwndex
 
+### 0.4.0
+- **English UI**.
+- **Browse by brand**: clickable vendor chips (Xiaomi, TP-Link…), marketplace style,
+  each with a per-brand count.
+- Clearer **Download .pcap** button on caught entries.
+
 ### 0.3.0
-- К пойманным сетям привязывается **хендшейк (.pcap)** — можно скачать из веб-морды.
-- **Фильтр по вендору** (выбор из списка) в дополнение к поиску и фильтрам.
+- Caught networks get their **handshake (.pcap)** attached — downloadable from the web UI.
+- **Vendor filter** in addition to search and filters.
 
 ### 0.2.0
-- Сети с паролем авто-добавляются в `main.whitelist` (не атаковать свои сети).
+- Networks with a password are auto-added to `main.whitelist` (don't attack your own).
 
 ### 0.1.0
-- Покедекс сетей + хранилище паролей + импорт из wpa-sec.
+- Network pokedex + password store + wpa-sec import.
 
 ## brain
 
+### 0.3.0
+- **English UI** and lines (proper sentences with the channel, e.g. "Switching tactics to ch 11.").
+- `(A_I)` now shows **instead of the face** on a decision (configurable `face_mode`,
+  shorter default hold).
+- **Web Settings panel**: tweak display time and the reward amounts live; rewards are
+  shown as a configurable **currency** (`$`). Settings persist in `/root/.brain/settings.json`.
+
 ### 0.2.0
-- `(A_I)` теперь показывается **вместо лица**: в момент решения большое лицо меняется на
-  `(A_I)`, а в строке речи идёт реплика с каналом («меняю тактику → 11»), потом лицо возвращается.
-- Реплики переписаны (AI/хакерский характер, с номером канала). Режим настраивается:
-  `face_mode = "face" | "corner" | "off"`, длительность — `say_seconds`.
+- `(A_I)` shown instead of the face on a decision; lines rewritten.
 
 ### 0.1.0
-- ИИ-агент (bandit): учится по каналам и рулит сканированием, лицо `(A_I)`, веб-стата.
+- AI agent (bandit): learns by channel and steers scanning, `(A_I)` face, web stats.
 
 ## bootlogo
 
 ### 0.4.7
-- Ползунки длительности: **показ на экране** (2–10 c) и **держать лого при загрузке** (3–30 c).
+- Duration sliders: **show on screen** (2–10 s) and **hold the logo on boot** (3–30 s).
 
 ### 0.4.6
-- Бут-сплэш запускается **правильным интерпретатором** pwnagotchi (фикс «No module named pwnagotchi»).
+- The boot splash runs with pwnagotchi's **correct interpreter** (fixes "No module named pwnagotchi").
 
 ### 0.4.5
-- Показ на экране возвращён к event-based варианту; бут-скрипт пишет лог; тайминг сервиса аккуратнее.
+- Show-on-screen reverted to the event-based variant; the boot script writes a log; cleaner service timing.
 
 ### 0.4.3
-- Объект дисплея ловится через UI-хуки (`on_ui_setup`/`on_ui_update`) — фикс «Дисплей недоступен».
+- The display object is grabbed via UI hooks (`on_ui_setup`/`on_ui_update`) — fixes "display unavailable".
 
 ### 0.4.2
-- **Фикс «Ошибка 400»**: отправка CSRF-токена (у веб-сервера pwnagotchi включён CSRFProtect).
+- **"Error 400" fix**: sends the CSRF token (pwnagotchi's web server has CSRFProtect on).
 
 ### 0.4.1
-- Транспорт надёжнее: `action` в query-строке, картинка сырым телом (без разбора формы).
+- More robust transport: `action` in the query string, the image as the raw body (no form parsing).
 
 ### 0.4.0
-- Вся обработка и превью **в браузере** (мгновенно, без 400 на превью); кнопка **«Показать на экране»**; RU/EN.
+- All processing and preview **in the browser** (instant, no 400 on preview); a **"Show on screen"** button; RU/EN.
 
 ### 0.3.x
-- Живое превью без перезагрузок, переключатель языка RU/EN, сжатие фото в браузере.
+- Live preview without reboots, RU/EN toggle, in-browser photo compression.
 
 ### 0.2.0
-- Веб-морда на AJAX: drag-and-drop, живое превью, рамка «как на e-ink».
+- AJAX web UI: drag-and-drop, live preview, "as on e-ink" frame.
 
 ### 0.1.0
-- Первый релиз: веб-загрузчик фото, подгон под экран, дизеринг/эффекты, бут-сплэш (systemd).
+- First release: web photo uploader, fit to screen, dithering/effects, boot splash (systemd).

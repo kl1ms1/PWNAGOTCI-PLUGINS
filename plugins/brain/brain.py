@@ -1,20 +1,21 @@
 """
-brain — ИИ-агент для pwnagotchi, который сам выбирает стратегию сканирования.
+brain — an AI agent for pwnagotchi that picks its own scanning strategy.
 
-Это НЕ тяжёлый deep-RL (без PyTorch/модели). Это лёгкий онлайн-агент
-(multi-armed bandit): он учится прямо на девайсе, на каких каналах больше улова,
-и смещает сканирование туда (exploit), иногда проверяя другие (explore).
+This is NOT heavy deep-RL (no PyTorch/model). It's a lightweight online agent
+(multi-armed bandit): it learns on-device which channels pay off the most and
+steers scanning there (exploit), occasionally probing others (explore).
 
-  • награда: on_handshake (большая) + цели/клиенты на канале (малая);
-  • выбор: epsilon-greedy по «ценности» канала (EWMA), + периодический полный скан;
-  • применяет через agent.run('wifi.recon.channel 1,6,11') — конфиг не переписывает;
-  • лицо (A_I) и реплики на e-ink;
-  • логи всех решений в /root/.brain/log.jsonl;
-  • веб-стата: http://<ip>:8080/plugins/brain/
+  • reward: on_handshake (big) + targets/clients on a channel (small);
+  • choice: epsilon-greedy over each channel's "value" (EWMA) + periodic full scan;
+  • applies it via agent.run('wifi.recon.channel 1,6,11') — never rewrites config;
+  • face (A_I) and short lines on the e-ink (takes over the face when it decides);
+  • logs every decision to /root/.brain/log.jsonl;
+  • web stats + settings: http://<ip>:8080/plugins/brain/
 
-Это «кооперативное» смещение: pwnagotchi в своём цикле тоже трогает каналы,
-поэтому агент переустанавливает выбор каждую эпоху. Лучше всего работает,
-когда main.personality.channels пуст (по умолчанию).
+Rewards are shown as a configurable currency (default "$"), so the per-channel
+value reads like how much each channel "earned". Display time and the reward
+amounts are tweakable right from the web page (saved to /root/.brain/settings.json,
+so it survives restarts without touching config.toml).
 """
 
 import json
@@ -25,54 +26,59 @@ import time
 
 import pwnagotchi.plugins as plugins
 
-HS_REWARD = 10.0          # награда за хендшейк на канале
-TARGET_REWARD = 0.5       # награда за клиента/цель на канале
-FACE = "(A_I)"            # «лицо» ИИ — показывается вместо обычного в момент решения
+FACE = "(A_I)"            # the AI "face" — shown instead of the normal one on a decision
 
-# {ch} подставляется выбранными каналами ("1·6·11"). Реплики — с AI/хакерским
-# характером (без рыбацких клише).
+# {ch} is replaced with the chosen channels ("1·6·11"). Proper sentences:
+# capitalized, with a period.
 PHRASES = {
-    "decide": ["меняю тактику → {ch}", "перехожу на {ch}", "вектор смещён на {ch}",
-               "приоритет: {ch}", "курс на {ch}", "захожу на {ch}",
-               "сканирую плотнее {ch}", "перенастраиваю приём на {ch}",
-               "пересчитал — цель {ch}", "смещаю фокус на {ch}"],
-    "hot":    ["{ch} кормит — остаюсь", "жатва на {ch}", "{ch} в топе, качаю",
-               "не ухожу с {ch}", "{ch} — золотая жила", "держу {ch}, тут улов"],
-    "quiet":  ["собираю данные…", "слушаю эфир", "калибруюсь", "учусь на лету",
-               "пока наблюдаю", "разведка эфира", "строю карту каналов"],
+    "decide": ["Switching tactics to ch {ch}.", "Moving to ch {ch}.",
+               "New vector: ch {ch}.", "Priority is ch {ch}.",
+               "Re-tuning to ch {ch}.", "Locking onto ch {ch}.",
+               "Recalculated — ch {ch}.", "Shifting focus to ch {ch}."],
+    "hot":    ["Ch {ch} is paying off.", "Rich pickings on ch {ch}.",
+               "Staying on ch {ch}.", "Ch {ch} is a goldmine.",
+               "Holding ch {ch}, good haul."],
+    "quiet":  ["Gathering data…", "Listening to the air.", "Calibrating…",
+               "Learning on the fly.", "Scouting for targets.",
+               "Mapping the channels."],
 }
 
 
 class Brain(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.2.0"
+    __version__ = "0.3.0"
     __license__ = "MIT"
-    __description__ = "ИИ-агент (bandit): учится и выбирает каналы сканирования."
+    __description__ = "AI agent (bandit): learns and picks scanning channels."
 
     def __init__(self):
         self._dir = "/root/.brain"
         self._state_f = os.path.join(self._dir, "state.json")
+        self._settings_f = os.path.join(self._dir, "settings.json")
         self._log = os.path.join(self._dir, "log.jsonl")
         self._ch = {}                 # ch -> {"value","n"}
         self._pool = list(range(1, 14))
-        self._epoch_r = {}            # аккумулятор награды за эпоху
+        self._epoch_r = {}            # reward accumulator for the epoch
         self._decisions = 0
         self._last_reward = 0.0
         self._last_choice = []
         self._epochs = 0
-        self._phrase = "собираю данные…"   # текущая реплика (для веб-статы)
-        # показ на e-ink
+        self._phrase = "Gathering data…"   # current line (for the web)
+        # e-ink show
         self._ui = None
-        self._say_until = 0.0              # до какого времени держим «AI-момент»
-        self._hold = 8                     # секунд держать лицо (A_I) + реплику
-        # опции
+        self._say_until = 0.0         # until when to hold the "AI moment"
+        # --- tweakable settings (web + config) ---
+        self._hold = 5                # seconds to hold face (A_I) + line
+        self._hs_reward = 10.0        # reward/price per handshake
+        self._target_reward = 0.5     # reward/price per client/target
+        self._currency = "$"          # currency symbol for the web
+        # --- fixed-ish options ---
         self._epsilon = 0.2
         self._top_k = 3
         self._full_every = 10
         self._warmup = 3
         self._alpha = 0.3
-        self._mode = "face"               # face | corner | off
-        self._pos = (0, 83)               # для режима corner
+        self._mode = "face"           # face | corner | off
+        self._pos = (0, 83)           # for corner mode
         self._enabled_steer = True
 
     # --- lifecycle ---------------------------------------------------------
@@ -83,14 +89,14 @@ class Brain(plugins.Plugin):
         self._top_k = int(o.get("top_k", self._top_k))
         self._full_every = int(o.get("full_scan_every", self._full_every))
         self._alpha = float(o.get("ewma_alpha", self._alpha))
-        # режим показа ИИ: face (вместо лица, по умолч.), corner (угол), off
         self._mode = str(o.get("face_mode", "face")).lower()
         if o.get("show_face") is False:
             self._mode = "off"
-        try:
-            self._hold = int(o.get("say_seconds", self._hold))
-        except Exception:
-            pass
+        # tweakable defaults from config
+        self._hold = int(o.get("say_seconds", self._hold))
+        self._hs_reward = float(o.get("hs_reward", self._hs_reward))
+        self._target_reward = float(o.get("target_reward", self._target_reward))
+        self._currency = str(o.get("currency", self._currency))[:3]
         if o.get("channels"):
             try:
                 self._pool = [int(c) for c in o.get("channels")]
@@ -103,8 +109,9 @@ class Brain(plugins.Plugin):
             except Exception:
                 pass
         self._load()
-        logging.info("[brain] loaded (eps=%.2f, top_k=%d, pool=%s)",
-                     self._epsilon, self._top_k, self._pool)
+        self._load_settings()         # web-saved settings win over config
+        logging.info("[brain] loaded (eps=%.2f, top_k=%d, hold=%ds, pool=%s)",
+                     self._epsilon, self._top_k, self._hold, self._pool)
 
     def on_ready(self, agent):
         try:
@@ -113,7 +120,7 @@ class Brain(plugins.Plugin):
                 self._pool = [c for c in self._pool if c in sc] or list(sc)
         except Exception:
             pass
-        # оптимистичная инициализация — чтобы каждый канал хоть раз попробовать
+        # optimistic init — so every channel gets tried at least once
         for c in self._pool:
             self._ch.setdefault(c, {"value": 1.0, "n": 0})
 
@@ -145,13 +152,35 @@ class Brain(plugins.Plugin):
         except Exception:
             pass
 
-    # --- сбор награды ------------------------------------------------------
+    def _load_settings(self):
+        try:
+            with open(self._settings_f, encoding="utf-8") as f:
+                s = json.load(f)
+            self._hold = int(s.get("hold", self._hold))
+            self._hs_reward = float(s.get("hs_reward", self._hs_reward))
+            self._target_reward = float(s.get("target_reward", self._target_reward))
+            self._currency = str(s.get("currency", self._currency))[:3]
+        except Exception:
+            pass
+
+    def _save_settings(self):
+        try:
+            tmp = self._settings_f + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump({"hold": self._hold, "hs_reward": self._hs_reward,
+                           "target_reward": self._target_reward,
+                           "currency": self._currency}, f)
+            os.replace(tmp, self._settings_f)
+        except Exception:
+            logging.exception("[brain] save settings failed")
+
+    # --- reward collection -------------------------------------------------
     def _reward(self, ch, amount):
         if ch:
             self._epoch_r[ch] = self._epoch_r.get(ch, 0.0) + amount
 
     def on_handshake(self, agent, filename, access_point, client_station):
-        self._reward((access_point or {}).get("channel"), HS_REWARD)
+        self._reward((access_point or {}).get("channel"), self._hs_reward)
 
     def on_wifi_update(self, agent, access_points):
         try:
@@ -159,14 +188,14 @@ class Brain(plugins.Plugin):
                 ch = ap.get("channel")
                 clients = ap.get("clients") or []
                 if ch:
-                    self._reward(ch, TARGET_REWARD * (len(clients) or 0.2))
+                    self._reward(ch, self._target_reward * (len(clients) or 0.2))
         except Exception:
             pass
 
-    # --- мозг: раз в эпоху решаем, куда смотреть ---------------------------
+    # --- the brain: once per epoch decide where to look --------------------
     def on_epoch(self, agent, epoch, epoch_data):
         self._epochs += 1
-        # 1) обновляем ценность каналов по собранной награде
+        # 1) update channel values from the reward collected
         total_r = sum(self._epoch_r.values())
         self._last_reward = round(total_r, 2)
         for ch in self._pool:
@@ -177,40 +206,40 @@ class Brain(plugins.Plugin):
                 e["n"] += 1
         self._epoch_r = {}
 
-        # прогрев: пока мало данных — не вмешиваемся и лицо не трогаем
+        # warmup: not enough data yet — don't interfere, don't touch the face
         if self._epochs <= self._warmup:
             self._phrase = random.choice(PHRASES["quiet"])
             return
 
-        # 2) выбираем каналы
+        # 2) pick channels
         chosen = self._choose()
         self._last_choice = chosen
         self._decisions += 1
 
-        # 3) применяем (не переписывая конфиг)
+        # 3) apply (without rewriting config)
         if self._enabled_steer and chosen:
             try:
                 agent.run("wifi.recon.channel %s" % ",".join(str(c) for c in chosen))
             except Exception:
                 logging.debug("[brain] set channels failed")
 
-        # 4) реплика + «AI-момент» на экране + лог
+        # 4) line + "AI moment" on the e-ink + log
         best = max(self._ch.get(c, {"value": 0})["value"] for c in chosen) if chosen else 0
-        self._set_phrase("hot" if best > HS_REWARD * 0.3 else "decide")
-        self._announce()          # лицо (A_I) + речь на e-ink на пару секунд
+        self._set_phrase("hot" if best > self._hs_reward * 0.3 else "decide")
+        self._announce()
         self._logline(chosen)
         if self._decisions % 5 == 0:
             self._save()
 
     def _choose(self):
-        # полный скан периодически — освежить картину
+        # full scan periodically — refresh the picture
         if self._full_every and self._epochs % self._full_every == 0:
             return list(self._pool)
         ranked = sorted(self._pool,
                         key=lambda c: self._ch.get(c, {"value": 0})["value"],
                         reverse=True)
         chosen = ranked[:max(1, self._top_k)]
-        # explore: с вероятностью epsilon докинуть случайный новый канал
+        # explore: with probability epsilon add a random new channel
         if random.random() < self._epsilon:
             rest = [c for c in self._pool if c not in chosen]
             if rest:
@@ -234,7 +263,7 @@ class Brain(plugins.Plugin):
         self._phrase = random.choice(PHRASES.get(kind, PHRASES["decide"])).format(ch=ch)
 
     def _announce(self):
-        """Открыть «AI-момент»: на _hold секунд показать (A_I) вместо лица + речь."""
+        """Open an "AI moment": show (A_I) instead of the face + the line for _hold s."""
         if self._mode == "off":
             return
         self._say_until = time.time() + self._hold
@@ -246,7 +275,7 @@ class Brain(plugins.Plugin):
                 logging.debug("[brain] announce failed")
 
     def _paint(self, ui):
-        """Нарисовать текущий AI-момент: лицо (A_I) + реплику в строке речи."""
+        """Draw the current AI moment: face (A_I) + the line in the speech slot."""
         ui.set("face", FACE)
         ui.set("status", self._phrase)
 
@@ -272,8 +301,8 @@ class Brain(plugins.Plugin):
                 pass
             return
         if self._mode == "face":
-            # держим лицо (A_I) + реплику, пока активен «AI-момент»;
-            # по истечении окна — отдаём экран обратно pwnagotchi.
+            # hold face (A_I) + the line while the "AI moment" is active;
+            # once the window ends, hand the screen back to pwnagotchi.
             if time.time() < self._say_until:
                 try:
                     self._paint(ui)
@@ -281,27 +310,66 @@ class Brain(plugins.Plugin):
                     pass
 
     # --- web ---------------------------------------------------------------
+    def _settings(self):
+        return {"hold": self._hold, "hs_reward": self._hs_reward,
+                "target_reward": self._target_reward, "currency": self._currency}
+
     def on_webhook(self, path, request):
         from flask import jsonify, abort
-        if request.method != "GET":
-            abort(405)
-        if request.args.get("action") == "data":
-            chans = [{"ch": c,
-                      "value": round(self._ch.get(c, {"value": 0})["value"], 2),
-                      "n": self._ch.get(c, {"n": 0})["n"]} for c in self._pool]
-            return jsonify(ok=True, channels=chans,
-                           decisions=self._decisions, epochs=self._epochs,
-                           last_reward=self._last_reward, epsilon=self._epsilon,
-                           choice=self._last_choice, phrase=self._phrase)
-        if path in (None, "", "/"):
-            return _PAGE
+        if request.method == "GET":
+            if request.args.get("action") == "data":
+                chans = [{"ch": c,
+                          "value": round(self._ch.get(c, {"value": 0})["value"], 2),
+                          "n": self._ch.get(c, {"n": 0})["n"]} for c in self._pool]
+                return jsonify(ok=True, channels=chans,
+                               decisions=self._decisions, epochs=self._epochs,
+                               last_reward=self._last_reward, epsilon=self._epsilon,
+                               choice=self._last_choice, phrase=self._phrase,
+                               settings=self._settings())
+            if path in (None, "", "/"):
+                return self._page()
+            abort(404)
+
+        # POST — body JSON (bypassing form parsing), CSRF checked by the server
+        body = {}
+        try:
+            raw = request.get_data(as_text=True)
+            if raw:
+                body = json.loads(raw)
+        except Exception:
+            body = {}
+
+        if request.args.get("action") == "save":
+            try:
+                if "hold" in body:
+                    self._hold = max(1, min(60, int(float(body["hold"]))))
+                if "hs_reward" in body:
+                    self._hs_reward = max(0.0, min(1000.0, float(body["hs_reward"])))
+                if "target_reward" in body:
+                    self._target_reward = max(0.0, min(1000.0, float(body["target_reward"])))
+                if "currency" in body:
+                    self._currency = (str(body["currency"]) or "$")[:3]
+            except Exception:
+                return jsonify(ok=False, msg="bad values"), 400
+            self._save_settings()
+            return jsonify(ok=True, settings=self._settings())
         abort(404)
+
+    def _page(self):
+        token = ""
+        try:
+            from flask_wtf.csrf import generate_csrf
+            token = generate_csrf()
+        except Exception:
+            token = ""
+        return _PAGE.replace("__CSRF__", token)
 
 
 _PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>brain</title><style>
 :root{color-scheme:dark;--bg:#0d1117;--card:#161b22;--line:#30363d;--mut:#8b949e;--fg:#e6edf3;--acc:#1f6feb;--ok:#238636}
+*{box-sizing:border-box}
 body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--fg);margin:0;padding:16px}
 .wrap{max-width:560px;margin:0 auto}h1{font-size:1.3rem;margin:.2em 0}
 .phrase{color:#9ad1ff;font-size:.95rem;margin:2px 0 12px}
@@ -312,32 +380,63 @@ body{font-family:system-ui,sans-serif;background:var(--bg);color:var(--fg);margi
 .ch .lbl{width:52px;color:var(--mut);font-size:.82rem}
 .bar{flex:1;height:14px;background:#0b0f14;border:1px solid var(--line);border-radius:7px;overflow:hidden}
 .bar>div{height:100%;background:linear-gradient(90deg,#1f6feb,#238636)}
-.ch .v{width:40px;text-align:right;font-size:.8rem}
+.ch .v{width:62px;text-align:right;font-size:.8rem}
 .ch.sel .lbl{color:#7ee2a0;font-weight:700}
+details{margin-top:16px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:4px 12px}
+summary{cursor:pointer;padding:8px 0;font-weight:600}
+.set{display:flex;align-items:center;justify-content:space-between;gap:10px;margin:8px 0}
+.set label{color:var(--mut);font-size:.85rem}
+.set input{width:120px;background:#0b0f14;color:var(--fg);border:1px solid var(--line);border-radius:8px;padding:7px 10px;font-size:.9rem}
+.savebtn{background:var(--ok);color:#fff;border:0;border-radius:9px;padding:9px 16px;cursor:pointer;margin:6px 0 10px}
 .muted{color:var(--mut);font-size:.78rem;text-align:center;margin-top:14px}
 </style></head><body><div class="wrap">
 <h1>🧠 brain</h1>
 <div class="phrase" id="phrase">(A_I)</div>
 <div class="stats" id="stats"></div>
 <div id="chans"></div>
-<div class="muted">ценность канала = сколько улова он приносил · учится онлайн 🫡</div>
+<details id="cfg"><summary>⚙️ Settings</summary>
+  <div class="set"><label>Show time on screen (sec)</label><input type="number" id="s_hold" min="1" max="60" step="1"></div>
+  <div class="set"><label>Reward per handshake</label><input type="number" id="s_hs" min="0" max="1000" step="0.5"></div>
+  <div class="set"><label>Reward per target</label><input type="number" id="s_tg" min="0" max="1000" step="0.1"></div>
+  <div class="set"><label>Currency symbol</label><input type="text" id="s_cur" maxlength="3"></div>
+  <button class="savebtn" id="save">💾 Save</button>
+  <span id="saved" style="color:#7ee2a0;font-size:.85rem"></span>
+</details>
+<div class="muted">a channel's value = how much it earned · learns online 🫡</div>
 </div>
 <script>
-const BASE="/plugins/brain/";
+const BASE="/plugins/brain/", CSRF="__CSRF__";
+const $=s=>document.querySelector(s);
+let CUR="$";
 async function load(){
   try{const j=await (await fetch(BASE+"?action=data",{credentials:"same-origin"})).json();
-    document.getElementById("phrase").textContent="(A_I) "+(j.phrase||"");
-    document.getElementById("stats").innerHTML=
-      tile(j.decisions,"решений")+tile(j.epochs,"эпох")+tile(j.last_reward,"награда")+tile(j.epsilon,"ε");
+    CUR=(j.settings&&j.settings.currency)||"$";
+    $("#phrase").textContent="(A_I) "+(j.phrase||"");
+    $("#stats").innerHTML=
+      tile(j.decisions,"decisions")+tile(j.epochs,"epochs")
+      +tile(CUR+j.last_reward,"last reward")+tile(j.epsilon,"ε");
     const sel=new Set(j.choice||[]);
     const max=Math.max(1,...j.channels.map(c=>c.value));
-    document.getElementById("chans").innerHTML=j.channels.map(c=>{
+    $("#chans").innerHTML=j.channels.map(c=>{
       const w=Math.max(2,Math.round(c.value/max*100));
       return '<div class="ch'+(sel.has(c.ch)?' sel':'')+'"><div class="lbl">ch '+c.ch+'</div>'
-        +'<div class="bar"><div style="width:'+w+'%"></div></div><div class="v">'+c.value+'</div></div>';
+        +'<div class="bar"><div style="width:'+w+'%"></div></div><div class="v">'+CUR+c.value+'</div></div>';
     }).join("");
+    if(!$("#cfg").open){const s=j.settings||{};
+      $("#s_hold").value=s.hold; $("#s_hs").value=s.hs_reward;
+      $("#s_tg").value=s.target_reward; $("#s_cur").value=s.currency;}
   }catch(e){}
 }
 function tile(v,l){return '<div class="stat"><b>'+(v==null?0:v)+'</b> '+l+'</div>';}
+$("#save").addEventListener("click",async()=>{
+  const body={hold:+$("#s_hold").value, hs_reward:+$("#s_hs").value,
+    target_reward:+$("#s_tg").value, currency:$("#s_cur").value||"$"};
+  $("#saved").textContent="…";
+  try{const j=await (await fetch(BASE+"?action=save",{method:"POST",credentials:"same-origin",
+    headers:{"X-CSRFToken":CSRF,"Content-Type":"application/json"},body:JSON.stringify(body)})).json();
+    $("#saved").textContent=j.ok?"saved ✓":"error";}
+  catch(e){$("#saved").textContent="error";}
+  setTimeout(()=>$("#saved").textContent="",1500);
+});
 load(); setInterval(load,4000);
 </script></body></html>"""

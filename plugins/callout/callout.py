@@ -1,13 +1,14 @@
 """
-callout — pwnagotchi называет жертву деаута по ИМЕНИ, а не по MAC.
+callout — pwnagotchi calls out the deauth victim by NAME instead of its MAC.
 
-Вместо "Kickbanning A4:83:E7:11:22:33" он скажет "кикаю Apple".
-Подменяет метод voice.Voice.on_deauth В ПАМЯТИ (сам voice.py не трогаем →
-обновления pwnagotchi это не стирают). Отдельной строки на экране нет —
-меняется та самая фраза, что он и так произносит.
+Instead of "Kickbanning A4:83:E7:11:22:33" it says "Kicking Ivan-PC off."
+It patches voice.Voice.on_deauth IN MEMORY (the voice.py file is left untouched,
+so pwnagotchi updates don't wipe it). There is no extra line on screen — it
+changes the very phrase pwnagotchi already speaks.
 
-Веб-морда (http://<ip>:8080/plugins/callout/): кнопка «Тест» (показать, что он скажет,
-не дожидаясь реального деаута) + список последних целей по имени. Лог: /root/.callout/log.txt.
+Web UI (http://<ip>:8080/plugins/callout/): a "Test phrase" button (shows what it
+would say right on the e-ink, without waiting for a real deauth) plus a list of
+recent targets by name. Log: /root/.callout/log.txt.
 """
 
 import logging
@@ -17,41 +18,56 @@ import time
 
 import pwnagotchi.plugins as plugins
 
+# Phrases are proper sentences: capitalized, with a period, and varied.
+# {name} is the device name.
 DEFAULT_PHRASES = [
-    "глушу {name}",
-    "кикаю {name}",
-    "отключаю {name}",
-    "вырубаю {name}",
-    "{name} — без WiFi!",
+    "Kicking {name} off.",
+    "Jamming {name}.",
+    "Deauthing {name}.",
+    "Dropping {name} now.",
+    "No WiFi for {name}.",
+    "{name} is out.",
+    "Booting {name} off the air.",
+    "Bye-bye, {name}.",
+    "Pressing F for {name}.",
+    "Cutting {name} loose.",
 ]
 
+# Demo clients for the Test button (mix of names and vendors).
 FAKE = [
-    {"vendor": "Apple"}, {"vendor": "Samsung"}, {"vendor": "TP-Link"},
-    {"vendor": "Xiaomi"}, {"hostname": "Ivan-PC"}, {"mac": "aa:bb:cc:11:22:33"},
+    {"hostname": "Ivan-PC"}, {"hostname": "Galaxy-S21"}, {"vendor": "Apple"},
+    {"vendor": "Xiaomi", "mac": "a4:50:46:9f:4f:2a"}, {"vendor": "TP-Link"},
+    {"mac": "aa:bb:cc:11:22:33"},
 ]
 
 
 def _nice_name(sta):
-    """Имя клиента: hostname -> vendor -> dev-XXXX -> устройство."""
+    """Device name: hostname first; else vendor+MAC tail; else Device-XXXX.
+
+    The goal is to always show a device-looking NAME (even an ugly one) rather
+    than just the vendor/company.
+    """
     sta = sta or {}
     for k in ("hostname", "name"):
         v = sta.get(k)
         if v and v not in ("", "?"):
             return v
-    v = sta.get("vendor") or sta.get("manufacturer")
-    if v:
-        return v
-    mac = (sta.get("mac") or "").replace(":", "")
-    if len(mac) >= 4:
-        return "dev-" + mac[-4:].upper()
-    return "устройство"
+    mac = (sta.get("mac") or "").replace(":", "").replace("-", "").upper()
+    tail = mac[-4:] if len(mac) >= 4 else ""
+    vendor = sta.get("vendor") or sta.get("manufacturer")
+    if vendor:
+        vendor = vendor.split()[0]
+        return "%s-%s" % (vendor, tail) if tail else vendor
+    if tail:
+        return "Device-" + tail
+    return "device"
 
 
 class Callout(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.4.0"
+    __version__ = "0.5.0"
     __license__ = "MIT"
-    __description__ = "pwnagotchi называет жертву деаута по имени, а не по MAC."
+    __description__ = "pwnagotchi calls out the deauth victim by name, not MAC."
 
     def __init__(self):
         self._dir = "/root/.callout"
@@ -59,11 +75,11 @@ class Callout(plugins.Plugin):
         self._phrases = DEFAULT_PHRASES
         self._recent = []
         self._patched = False
-        # для показа фразы на самом экране (e-ink)
+        # showing the phrase on the e-ink itself
         self._ui = None
-        self._say_text = ""        # что сейчас «говорит» девайс по тесту
-        self._say_until = 0.0      # до какого времени держать на экране
-        self._hold = 6             # секунд держать тест-фразу на экране
+        self._say_text = ""        # what the device is "saying" for the test
+        self._say_until = 0.0      # until when to hold it on screen
+        self._hold = 6             # seconds to hold the test phrase on screen
 
     def on_loaded(self):
         os.makedirs(self._dir, exist_ok=True)
@@ -77,7 +93,7 @@ class Callout(plugins.Plugin):
         self._patch_voice()
         logging.info("[callout] loaded (patched=%s)", self._patched)
 
-    # --- подмена родной фразы деаута --------------------------------------
+    # --- replace the native deauth phrase ---------------------------------
     def _patch_voice(self):
         try:
             import pwnagotchi.voice as voice
@@ -94,7 +110,7 @@ class Callout(plugins.Plugin):
             voice.Voice.on_deauth = _patched
             self._patched = True
         except Exception:
-            logging.exception("[callout] не смог подменить voice.on_deauth")
+            logging.exception("[callout] could not patch voice.on_deauth")
             self._patched = False
 
     def on_unload(self, ui):
@@ -105,13 +121,13 @@ class Callout(plugins.Plugin):
         except Exception:
             pass
 
-    # --- лог + история ----------------------------------------------------
+    # --- log + history ----------------------------------------------------
     def _record(self, who, net):
         self._recent.insert(0, {"t": int(time.time()), "who": who, "net": net})
         self._recent = self._recent[:100]
         try:
             with open(self._log, "a", encoding="utf-8") as f:
-                f.write("%s %s ▸ %s\n" %
+                f.write("%s %s -> %s\n" %
                         (time.strftime("%Y-%m-%d %H:%M:%S"), who, net))
         except Exception:
             pass
@@ -120,19 +136,19 @@ class Callout(plugins.Plugin):
         try:
             who = _nice_name(client_station)
             ap = access_point or {}
-            self._record(who, ap.get("hostname") or ap.get("essid") or "сеть")
+            self._record(who, ap.get("hostname") or ap.get("essid") or "network")
         except Exception:
             logging.exception("[callout] on_deauth")
 
-    # --- показ фразы на e-ink ---------------------------------------------
-    # Ловим объект дисплея (view) через UI-хуки — надёжнее, чем agent.view().
+    # --- show the phrase on the e-ink -------------------------------------
+    # Grab the display (view) via UI hooks — more reliable than agent.view().
     def on_ui_setup(self, ui):
         self._ui = ui
 
     def on_ui_update(self, ui):
         self._ui = ui
-        # пока активен тест — держим фразу в строке речи, чтобы pwnagotchi
-        # не затёр её своим текстом сразу же.
+        # while a test is active, keep the phrase in the speech line so
+        # pwnagotchi doesn't immediately overwrite it with its own text.
         if self._say_text and time.time() < self._say_until:
             try:
                 ui.set("status", self._say_text)
@@ -143,10 +159,10 @@ class Callout(plugins.Plugin):
             except Exception:
                 pass
         elif self._say_text and time.time() >= self._say_until:
-            self._say_text = ""   # окно показа кончилось
+            self._say_text = ""   # show window ended
 
     def _say_on_screen(self, text):
-        """Показать фразу на самом экране (как при настоящем деауте)."""
+        """Show the phrase on the screen itself (like a real deauth)."""
         self._say_text = text
         self._say_until = time.time() + self._hold
         if self._ui is not None:
@@ -158,7 +174,7 @@ class Callout(plugins.Plugin):
                     self._ui.set("face", face)
                 self._ui.update(force=True)
             except Exception:
-                logging.debug("[callout] не смог вывести на экран")
+                logging.debug("[callout] could not draw on screen")
 
     # --- web --------------------------------------------------------------
     def on_webhook(self, path, request):
@@ -171,8 +187,8 @@ class Callout(plugins.Plugin):
         if act == "test":
             sta = random.choice(FAKE)
             sample = random.choice(self._phrases).format(name=_nice_name(sta))
-            self._record("ТЕСТ: " + _nice_name(sta), "demo")
-            self._say_on_screen(sample)   # показать прямо на e-ink
+            self._record("TEST: " + _nice_name(sta), "demo")
+            self._say_on_screen(sample)   # show it right on the e-ink
             return jsonify(ok=True, sample=sample, shown=self._ui is not None)
         if path in (None, "", "/"):
             return _PAGE
@@ -198,28 +214,28 @@ border-radius:10px;padding:9px 12px;margin:7px 0;display:flex;justify-content:sp
 </style></head><body><div class="wrap">
 <h1>📢 callout</h1>
 <div class="sub" id="sub"></div>
-<div class="bar"><button class="btn" id="test">🧪 Тест фразы</button><span class="sample" id="sample"></span></div>
-<div id="list"><div class="empty">загрузка…</div></div>
-<div class="muted">pwnagotchi говорит имя вместо MAC · только свои сети 🫡</div>
+<div class="bar"><button class="btn" id="test">🧪 Test phrase</button><span class="sample" id="sample"></span></div>
+<div id="list"><div class="empty">loading…</div></div>
+<div class="muted">pwnagotchi says the name instead of the MAC · your networks only 🫡</div>
 </div>
 <script>
 const BASE="/plugins/callout/";
 function esc(s){return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
-function age(t){const d=Date.now()/1000-t;if(d<60)return Math.round(d)+"с";
-  if(d<3600)return Math.round(d/60)+"м";return Math.round(d/3600)+"ч";}
+function age(t){const d=Date.now()/1000-t;if(d<60)return Math.round(d)+"s";
+  if(d<3600)return Math.round(d/60)+"m";return Math.round(d/3600)+"h";}
 async function load(){
   try{const j=await (await fetch(BASE+"?action=data",{credentials:"same-origin"})).json();
-    document.getElementById("sub").textContent=j.patched?"фраза деаута подменена ✓":"⚠ подмена не применилась";
+    document.getElementById("sub").textContent=j.patched?"deauth phrase replaced ✓":"⚠ patch not applied";
     const it=j.items||[];
     document.getElementById("list").innerHTML = it.length
       ? it.map(e=>'<div class="row"><div><div class="who">'+esc(e.who)
           +'</div><div class="net">▸ '+esc(e.net)+'</div></div><div class="age">'+age(e.t)+'</div></div>').join("")
-      : '<div class="empty">пока никого не глушили — нажми «Тест»</div>';
+      : '<div class="empty">nobody jammed yet — hit “Test”</div>';
   }catch(e){}
 }
 document.getElementById("test").addEventListener("click",async()=>{
   try{const j=await (await fetch(BASE+"?action=test",{credentials:"same-origin"})).json();
-    document.getElementById("sample").textContent=(j.shown?"на экране ▸ ":"он скажет: ")+(j.sample||"");}catch(e){}
+    document.getElementById("sample").textContent=(j.shown?"on screen ▸ ":"it will say: ")+(j.sample||"");}catch(e){}
   load();
 });
 load(); setInterval(load,5000);

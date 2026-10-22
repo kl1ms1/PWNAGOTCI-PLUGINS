@@ -1,69 +1,68 @@
 # 🖼️ bootlogo
 
-Кастомное бут-лого для Pwnagotchi с **веб-загрузчиком**: кидаешь фото в браузере —
-плагин сам подгоняет под твой экран, переводит в ч/б (дизеринг под e-ink) и может
-показывать картинку **при включении** девайса.
+A custom boot logo for Pwnagotchi with a **web uploader**: drop a photo in the
+browser — the plugin fits it to your screen, converts it to black & white
+(e-ink dithering) and can show the image **when the device powers on**.
 
-## Что умеет
-- Веб-морда с **drag-and-drop** фото.
-- **Вся обработка и превью — прямо в браузере** (мгновенно, без запросов к девайсу):
-  живое превью в рамке «как на e-ink».
-- Подгон под экран: **вписать / обрезать по центру / растянуть / по центру без масштаба**.
-- Эффекты: **дизеринг** (Floyd–Steinberg) или **порог**, **инверсия**, **яркость**, **контраст**, **поворот**.
-- 👁 **«Показать на экране»** — выводит картинку на e-ink **без перезагрузки**
-  (кадр отдаётся в штатный рендер-поток pwnagotchi, без гонок).
-- 💾 **«Сохранить как бут-лого»** — на девайс уходит только маленький финальный PNG.
-- Переключатель **«Показ при загрузке»** (systemd-сервис, таймаут подстраивается).
-- **Ползунки длительности**: сколько держать превью на экране (2–10 c) и сколько
-  держать лого при загрузке (3–30 c).
-- **Переключатель языка RU/EN** (запоминается в браузере).
-- Размер экрана определяется **автоматически** (можно переопределить в конфиге).
+## What it does
+- Web UI with **drag-and-drop** photo upload.
+- **All processing and preview happen in the browser** (instant, no round-trips to
+  the device): live preview in an "as on e-ink" frame.
+- Fit to screen: **contain / center-crop / stretch / center at native size**.
+- Effects: **dithering** (Floyd–Steinberg) or **threshold**, **invert**,
+  **brightness**, **contrast**, **rotation**.
+- 👁 **"Show on screen"** — pushes the image to the e-ink **without a reboot**
+  (the frame is handed to pwnagotchi's normal render thread, no races).
+- 💾 **"Save as boot logo"** — only the small final PNG goes to the device.
+- A **"Show on boot"** toggle (systemd service, timeout auto-tuned).
+- **Duration sliders**: how long to hold the preview on screen (2–10 s) and how
+  long to hold the logo on boot (3–30 s).
+- **RU/EN language toggle** (remembered in the browser).
+- Screen size is **auto-detected** (can be overridden in the config).
 
-## Установка
+## Install
 ```bash
 sudo cp bootlogo.py /usr/local/share/pwnagotchi/custom-plugins/
-sudo nano /etc/pwnagotchi/config.toml   # добавь строки из bootlogo.toml
+sudo nano /etc/pwnagotchi/config.toml   # add the lines from bootlogo.toml
 sudo systemctl restart pwnagotchi
 ```
 
-## Как пользоваться
-1. Открой `http://<ip>:8080/plugins/bootlogo/` (логин/пароль — как у веб-морды pwnagotchi).
-2. Загрузи фото, покрути подгон/эффекты, жми **«Обработать»** — смотри превью.
-3. **«Сохранить как бут-лого»** — картинка уходит в `/root/pwnagotchi-bootlogo.png`.
-4. **«Включить показ при загрузке»** — один раз, чтобы лого появлялось при включении.
+## How to use
+1. Open `http://<ip>:8080/plugins/bootlogo/` (same login/password as the pwnagotchi web UI).
+2. Upload a photo, tweak fit/effects, hit **"Process"** — watch the preview.
+3. **"Save as boot logo"** — the image goes to `/root/pwnagotchi-bootlogo.png`.
+4. **"Enable show on boot"** — once, so the logo appears at power-on.
 
-## Показ при включении — как это работает
-Кнопка ставит oneshot-сервис `pwnagotchi-bootlogo.service` с `Before=pwnagotchi.service`:
-при загрузке он рисует сохранённый PNG прямо на e-ink, переиспользуя драйвер дисплея
-из pwnagotchi. Модель берётся из `ui.display.type` в `config.toml` — она должна быть
-там прописана (обычно задаётся при установке образа).
+## Show on boot — how it works
+The button installs a oneshot service `pwnagotchi-bootlogo.service` with
+`Before=pwnagotchi.service`: at boot it draws the saved PNG straight to the e-ink,
+reusing pwnagotchi's display driver. The model is read from `ui.display.type` in
+`config.toml` — it must be set there (usually done when the image is flashed).
 
-Ручная установка автозапуска (альтернатива кнопке) — см. шапку `boot_logo_show.py`.
-
-## Опции (config.toml)
-| Ключ | По умолчанию | Описание |
+## Options (config.toml)
+| Key | Default | Description |
 |---|---|---|
-| `enabled` | — | включить плагин |
-| `path` | `/root/pwnagotchi-bootlogo.png` | куда сохранять бут-лого |
-| `width` / `height` | авто | размер экрана, если авто-детект не сработал |
+| `enabled` | — | turn the plugin on |
+| `path` | `/root/pwnagotchi-bootlogo.png` | where to save the boot logo |
+| `width` / `height` | auto | screen size if auto-detect fails |
 
-## Диагностика
-| Симптом | Что делать |
+## Troubleshooting
+| Symptom | What to do |
 |---|---|
-| веб-страница 404 | проверь `main.custom_plugins` и имя файла `bootlogo.py` |
-| превью «мыльное»/грязное | поменяй дизеринг↔порог, порог, яркость/контраст |
-| при включении пусто | задан ли `ui.display.type`? `systemctl status pwnagotchi-bootlogo` |
-| картинка перевёрнута | подбери поворот в веб-морде (экран часто стоит на 180°) |
-| неверный размер | задай `width`/`height` в конфиге под свою панель |
+| web page 404 | check `main.custom_plugins` and the filename `bootlogo.py` |
+| preview looks "muddy" | switch dithering↔threshold, tweak threshold, brightness/contrast |
+| nothing at boot | is `ui.display.type` set? `systemctl status pwnagotchi-bootlogo` |
+| image upside down | pick a rotation in the web UI (the screen is often mounted at 180°) |
+| wrong size | set `width`/`height` in the config for your panel |
 
-## 🚑 Если после «показа при загрузке» девайс долго грузится / экран завис
-Boot-сервис подвис на инициализации дисплея. Зайди по SSH (sshd работает отдельно,
-даже если pwnagotchi не поднялся) и выключи его:
+## 🚑 If the device is slow to boot / screen freezes after "show on boot"
+The boot service hung initializing the display. SSH in (sshd runs separately, even
+if pwnagotchi didn't come up) and disable it:
 ```bash
 sudo systemctl disable --now pwnagotchi-bootlogo.service
 sudo systemctl restart pwnagotchi
 ```
-В сервисе стоит жёсткий таймаут (20 с), так что надолго заблокировать загрузку он не может.
-Чаще всего причина — неверный `ui.display.type` в конфиге: проверь его и пересохрани лого.
+The service has a hard timeout (20 s), so it can't block boot for long. The usual
+cause is a wrong `ui.display.type` in the config: check it and re-save the logo.
 
-> ⚠️ Только для своих устройств.
+> ⚠️ Your own devices only.

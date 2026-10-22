@@ -1,27 +1,32 @@
-# Конфиг brain. Скопируй нужное в /etc/pwnagotchi/config.toml.
+# brain config. Copy what you need into /etc/pwnagotchi/config.toml.
 
 main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
 main.plugins.brain.enabled = true
 
-# Исследование vs эксплуатация (0..1): больше = чаще проверяет новые каналы.
+# Explore vs exploit (0..1): higher = probes new channels more often.
 main.plugins.brain.epsilon = 0.2
-# Сколько лучших каналов держать в фокусе.
+# How many of the best channels to keep in focus.
 main.plugins.brain.top_k = 3
-# Раз в сколько эпох делать полный скан всех каналов (освежить картину).
+# Do a full scan of all channels once every N epochs (refresh the picture).
 main.plugins.brain.full_scan_every = 10
 
-# Лицо (A_I) и реплики на e-ink.
-#   face   — в момент решения БОЛЬШОЕ лицо меняется на (A_I), в строке речи
-#            идёт реплика с каналом ("меняю тактику → 11"), потом лицо назад (по умолч.).
-#   corner — обычное лицо не трогаем, (A_I)+реплика живут отдельной строкой в углу.
-#   off    — на экране ничего не показывать (только веб-стата).
+# The (A_I) face and lines on the e-ink.
+#   face   — on a decision the BIG face turns into (A_I) and the speech line shows
+#            the line with the channel ("Switching tactics to ch 11."), then back (default).
+#   corner — leave the normal face, (A_I)+line live on a separate line in the corner.
+#   off    — show nothing on screen (web stats only).
 main.plugins.brain.face_mode = "face"
-# Сколько секунд держать «AI-момент» (лицо + реплику) на экране.
-main.plugins.brain.say_seconds = 8
-# Только для corner: позиция отдельной строки.
+# How many seconds to hold the "AI moment" (face + line) on screen.
+main.plugins.brain.say_seconds = 5
+# Corner mode only: position of the separate line.
 main.plugins.brain.position = "0,83"
 
-# Ограничить пул каналов (необязательно). Пусто = все поддерживаемые.
+# Reward amounts (shown as currency in the web UI; also tweakable there live).
+main.plugins.brain.hs_reward = 10      # reward per captured handshake
+main.plugins.brain.target_reward = 0.5 # reward per client/target on a channel
+main.plugins.brain.currency = "$"      # currency symbol for the web page
+
+# Limit the channel pool (optional). Empty = all supported.
 # main.plugins.brain.channels = [1, 6, 11]
 
-# Подсказка: лучше всего работает, когда main.personality.channels пуст.
+# Tip: works best when main.personality.channels is empty.

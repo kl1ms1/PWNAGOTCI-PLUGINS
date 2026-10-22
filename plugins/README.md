@@ -1,14 +1,14 @@
-# 🧩 Плагины
+# 🧩 Plugins
 
-Индекс готовых плагинов. Каждый живёт в своей папке: `<имя>/<имя>.py` + `<имя>.toml`
-(пример конфига) + короткий `README.md`.
+Index of ready plugins. Each lives in its own folder: `<name>/<name>.py` + `<name>.toml`
+(example config) + a short `README.md`.
 
-| Плагин | Статус | Описание |
-|--------|--------|----------|
-| [`bootlogo`](bootlogo/) | ✅ | Кастомное бут-лого: веб-загрузчик фото + авто-обработка под e-ink + показ при включении |
-| [`pwndex`](pwndex/) | ✅ | «Покедекс» сетей: каталог, поиск, пароли; свои сети (с паролем) → в whitelist |
-| [`callout`](callout/) | ✅ | pwnagotchi говорит имя жертвы деаута вместо MAC (+ тест-кнопка, лог, веб) |
-| [`brain`](brain/) | ✅ | ИИ-агент (bandit): учится и выбирает каналы сканирования, лицо `(A_I)`, веб-стата |
-| [`template`](template/) | 📄 шаблон | Скелет для старта нового плагина |
+| Plugin | Status | Description |
+|--------|--------|-------------|
+| [`bootlogo`](bootlogo/) | ✅ | Custom boot logo: web photo uploader + auto-processing for e-ink + show at power-on |
+| [`pwndex`](pwndex/) | ✅ | Network "pokedex": catalog, search, browse by brand, passwords; your networks (with a password) → whitelist |
+| [`callout`](callout/) | ✅ | pwnagotchi calls out the deauth victim by name instead of MAC (+ test button, log, web) |
+| [`brain`](brain/) | ✅ | AI agent (bandit): learns and picks scanning channels, `(A_I)` face, web stats + settings |
+| [`template`](template/) | 📄 template | Skeleton to start a new plugin |
 
-Берём идею из [../ROADMAP.md](../ROADMAP.md) → копируем `template/` → пишем.
+Pick an idea from [../ROADMAP.md](../ROADMAP.md) → copy `template/` → write.
