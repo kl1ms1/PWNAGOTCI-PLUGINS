@@ -24,7 +24,7 @@ import pwnagotchi.plugins as plugins
 
 class Pwndex(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.2.0"
+    __version__ = "0.3.0"
     __license__ = "MIT"
     __description__ = "Покедекс сетей: каталог AP (SSID/вендор/MAC), поиск, пароли. Веб-морда."
 
@@ -129,7 +129,7 @@ class Pwndex(plugins.Plugin):
         m = (ap.get("mac") or ap.get("bssid") or "").upper().replace("-", ":")
         return m if len(m) == 17 else ""
 
-    def _touch(self, ap, caught=False):
+    def _touch(self, ap, caught=False, pcap=None):
         mac = self._mac(ap)
         if not mac:
             return
@@ -142,8 +142,10 @@ class Pwndex(plugins.Plugin):
                 e = {"ssid": ssid, "mac": mac, "vendor": vendor,
                      "enc": ap.get("encryption") or "", "ch": ap.get("channel") or 0,
                      "rssi": ap.get("rssi") or 0, "first": now, "last": now,
-                     "seen": 0, "caught": False, "pw": "", "note": ""}
+                     "seen": 0, "caught": False, "pw": "", "note": "", "pcap": ""}
                 self._dex[mac] = e
+            if pcap:
+                e["pcap"] = pcap          # путь к пойманному хендшейку (.pcap = «хэш»)
             if ssid and not e.get("ssid"):
                 e["ssid"] = ssid
             if vendor and not e.get("vendor"):
@@ -161,7 +163,7 @@ class Pwndex(plugins.Plugin):
             self._dirty = True
 
     def on_handshake(self, agent, filename, access_point, client_station):
-        self._touch(access_point, caught=True)
+        self._touch(access_point, caught=True, pcap=filename)
         self._save()
 
     def on_wifi_update(self, agent, access_points):
@@ -271,12 +273,30 @@ class Pwndex(plugins.Plugin):
             if request.method == "GET":
                 if action == "data":
                     with self._lock:
-                        items = sorted(
+                        src = sorted(
                             self._dex.values(),
                             key=lambda e: (not e.get("caught"),
                                            (e.get("ssid") or "￿").lower()))
-                        items = [dict(e) for e in items]
-                    return jsonify(ok=True, items=items, stats=self._stats())
+                        items = []
+                        vendors = set()
+                        for e in src:
+                            it = dict(e)
+                            it["hp"] = bool(it.pop("pcap", ""))   # есть хендшейк
+                            if it.get("vendor"):
+                                vendors.add(it["vendor"])
+                            items.append(it)
+                    return jsonify(ok=True, items=items, stats=self._stats(),
+                                   vendors=sorted(vendors))
+                if action == "pcap":
+                    from flask import send_file
+                    mac = (request.args.get("mac") or "").upper()
+                    with self._lock:
+                        e = self._dex.get(mac)
+                        p = e.get("pcap") if e else None
+                    if p and os.path.exists(p):
+                        return send_file(p, as_attachment=True,
+                                         download_name=os.path.basename(p))
+                    abort(404)
                 if path in (None, "", "/"):
                     return self._page()
                 abort(404)
@@ -363,12 +383,15 @@ padding:6px 12px;font-size:.82rem;cursor:pointer}
 .fld{margin:6px 0}.fld label{display:block;font-size:.78rem;color:var(--mut);margin-bottom:3px}
 .pwline{display:flex;gap:6px}.pwline input{flex:1}
 .save{background:var(--ok)}
+#vendor{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:8px 10px;font-size:.85rem}
+.dl{display:inline-block;margin-top:8px;color:#58a6ff;font-size:.85rem;text-decoration:none}
 .muted{color:var(--mut);font-size:.78rem;text-align:center;margin-top:14px}
 .empty{color:var(--mut);text-align:center;padding:30px 0}
 </style></head><body><div class="wrap">
 <h1>🎮 pwndex</h1>
 <div class="stats" id="stats"></div>
 <div class="bar"><input type="search" id="q" placeholder="Поиск: SSID, вендор или MAC…"></div>
+<div class="bar"><select id="vendor"><option value="">🏭 все вендоры</option></select></div>
 <div class="bar"><div class="chips" id="filters">
   <button class="chip on" data-f="all">Все</button>
   <button class="chip" data-f="caught">🏆 Пойманы</button>
@@ -381,15 +404,21 @@ padding:6px 12px;font-size:.82rem;cursor:pointer}
 <script>
 const BASE="/plugins/pwndex/", CSRF="__CSRF__";
 const $=s=>document.querySelector(s);
-let ALL=[], filter="all", q="";
+let ALL=[], filter="all", q="", vendorFilter="";
 
 function esc(s){return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function fmtAge(t){if(!t)return"";const d=Date.now()/1000-t;
   if(d<3600)return Math.round(d/60)+"м";if(d<86400)return Math.round(d/3600)+"ч";return Math.round(d/86400)+"д";}
 
+function fillVendors(list){
+  const sel=$("#vendor"), cur=sel.value;
+  sel.innerHTML='<option value="">🏭 все вендоры</option>'
+    +(list||[]).map(v=>'<option value="'+esc(v)+'">'+esc(v)+'</option>').join("");
+  sel.value=cur;
+}
 async function load(){
   try{const r=await fetch(BASE+"?action=data",{credentials:"same-origin"});
-    const j=await r.json();if(!j.ok)return;ALL=j.items||[];renderStats(j.stats);render();}
+    const j=await r.json();if(!j.ok)return;ALL=j.items||[];fillVendors(j.vendors);renderStats(j.stats);render();}
   catch(e){$("#list").innerHTML='<div class="empty">Не удалось загрузить</div>';}
 }
 function renderStats(s){s=s||{};$("#stats").innerHTML=
@@ -400,6 +429,7 @@ function match(e){
   if(filter==="caught"&&!e.caught)return false;
   if(filter==="pw"&&!e.pw)return false;
   if(filter==="seen"&&e.caught)return false;
+  if(vendorFilter&&e.vendor!==vendorFilter)return false;
   if(q){const s=(e.ssid+" "+e.vendor+" "+e.mac).toLowerCase();if(!s.includes(q))return false;}
   return true;
 }
@@ -423,6 +453,7 @@ function row(e){
    +'<input type="text" class="pw" value="'+esc(e.pw||"")+'" placeholder="нет">'
    +'<button class="btn save" onclick="save(this)">💾</button></div></div>'
    +'<div class="fld"><label>Заметка</label><input type="text" class="note" value="'+esc(e.note||"")+'" placeholder="—"></div>'
+   +(e.hp?'<a class="dl" href="'+BASE+'?action=pcap&mac='+encodeURIComponent(e.mac)+'">⬇ скачать хэш (.pcap)</a>':'')
    +'</div></div>';
 }
 function toggle(h){h.parentElement.querySelector(".det").classList.toggle("open");}
@@ -439,6 +470,7 @@ async function save(btn){
   catch(e){btn.textContent="✗";setTimeout(()=>btn.textContent="💾",1200);}
 }
 $("#q").addEventListener("input",()=>{q=$("#q").value.toLowerCase().trim();render();});
+$("#vendor").addEventListener("change",()=>{vendorFilter=$("#vendor").value;render();});
 document.querySelectorAll("#filters .chip").forEach(c=>c.addEventListener("click",()=>{
   document.querySelectorAll("#filters .chip").forEach(x=>x.classList.remove("on"));
   c.classList.add("on");filter=c.dataset.f;render();}));
