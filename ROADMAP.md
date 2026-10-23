@@ -28,8 +28,8 @@ Statuses: 💡 idea · 🏗️ in progress · ✅ done · 🔧 needs hardware
   (Hunt / Sync / Disguise). Sync = pause hunting → connect to your own network →
   upload to wpa-sec → access the native web UI. The 3rd position is a hidden mode
   with a combo lock. Order: **3rd** (waiting for hardware ~the 25th).
-- 💡 **voice.py → RU** — translate all of pwnagotchi's phrases to Russian (a gift
-  RU edition), set up so updates don't wipe it (plugin/custom). TODO: send voice.py.
+- ✅ **voice_ru** — all of pwnagotchi's phrases translated to Russian, applied in memory
+  so updates don't wipe it. Done. See [plugins/voice_ru](plugins/voice_ru/).
 
 ## ⭐ Flagship: One-Touch Sync ("the Slider Exorcist")
 

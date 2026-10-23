@@ -1,0 +1,7 @@
+# voice_ru config. Copy into /etc/pwnagotchi/config.toml.
+
+main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
+main.plugins.voice_ru.enabled = true
+
+# That's it — no options. It translates every pwnagotchi phrase to Russian.
+# Tip: if callout is also enabled, callout still overrides the deauth phrase.

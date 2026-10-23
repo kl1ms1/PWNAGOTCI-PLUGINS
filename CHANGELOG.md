@@ -51,6 +51,13 @@ Versions of the plugins in this repository.
 ### 0.1.0
 - Network pokedex + password store + wpa-sec import.
 
+## voice_ru
+
+### 1.0.0
+- pwnagotchi now **speaks Russian**: every phrase translated via an in-memory swap of
+  the `self._` translator (one dict, all ~25 methods), so updates don't wipe it.
+  Ships with the full translated core file `voice.ru.py` as an alternative.
+
 ## brain
 
 ### 0.3.0
