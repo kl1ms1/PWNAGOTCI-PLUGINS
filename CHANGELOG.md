@@ -25,6 +25,11 @@ Versions of the plugins in this repository.
 
 ## pwndex
 
+### 0.6.0
+- A **"💾 .pcap" button right on each caught network** (next to the badge) — saves the
+  handshake file without expanding the entry.
+- **Removed** the "Browse by brand" vendor chips (search still matches the vendor).
+
 ### 0.5.0
 - **Export passwords**: a button downloads all saved passwords as a `.txt` (SSID / MAC / vendor / password).
 - Saving a password now **confirms in the UI** that the network was added to the whitelist

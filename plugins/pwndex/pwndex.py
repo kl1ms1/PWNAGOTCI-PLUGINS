@@ -26,7 +26,7 @@ import pwnagotchi.plugins as plugins
 
 class Pwndex(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.5.0"
+    __version__ = "0.6.0"
     __license__ = "MIT"
     __description__ = "Network pokedex: AP catalog (SSID/vendor/MAC), search, passwords. Web UI."
 
@@ -392,13 +392,10 @@ border-radius:9px;padding:9px 12px;font-size:.95rem;width:100%}
 .chip{background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:20px;
 padding:6px 12px;font-size:.82rem;cursor:pointer}
 .chip.on{background:var(--acc);border-color:var(--acc)}
-.brands{display:flex;gap:6px;overflow-x:auto;padding-bottom:4px;-webkit-overflow-scrolling:touch}
-.brand{flex:0 0 auto;background:#21262d;color:var(--fg);border:1px solid var(--line);border-radius:10px;
-padding:7px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap}
-.brand.on{background:var(--gold);border-color:var(--gold);color:#1a1a1a;font-weight:600}
-.brand .n{color:var(--mut);font-size:.72rem;margin-left:4px}
-.brand.on .n{color:#1a1a1a}
-.lbl-row{font-size:.72rem;color:var(--mut);margin:2px 0 4px}
+.rt{display:flex;flex-direction:column;align-items:flex-end;gap:5px;flex:0 0 auto}
+.dlmini{background:#172f1c;color:#7ee2a0;border:1px solid #2ea04366;border-radius:7px;
+padding:4px 9px;font-size:.75rem;text-decoration:none;white-space:nowrap}
+.dlmini:hover{background:#1d3d24}
 .btn{background:#30363d;color:#fff;border:0;border-radius:9px;padding:9px 14px;cursor:pointer;font-size:.85rem}
 .row{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin:8px 0}
 .row.caught{border-left:3px solid var(--ok)}
@@ -425,8 +422,6 @@ border-radius:8px;padding:7px 12px;font-size:.85rem;text-decoration:none}
 <h1>🎮 pwndex</h1>
 <div class="stats" id="stats"></div>
 <div class="bar"><input type="search" id="q" placeholder="Search: SSID, vendor or MAC…"></div>
-<div class="lbl-row">Browse by brand</div>
-<div class="brands" id="brands"></div>
 <div class="bar"><div class="chips" id="filters">
   <button class="chip on" data-f="all">All</button>
   <button class="chip" data-f="caught">🏆 Caught</button>
@@ -449,21 +444,9 @@ function esc(s){return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>'
 function fmtAge(t){if(!t)return"";const d=Date.now()/1000-t;
   if(d<3600)return Math.round(d/60)+"m";if(d<86400)return Math.round(d/3600)+"h";return Math.round(d/86400)+"d";}
 
-function renderBrands(){
-  // count networks per vendor, show as clickable brand chips (marketplace style)
-  const counts={};
-  ALL.forEach(e=>{if(e.vendor)counts[e.vendor]=(counts[e.vendor]||0)+1;});
-  const brands=Object.keys(counts).sort((a,b)=>counts[b]-counts[a]);
-  const box=$("#brands");
-  box.innerHTML='<button class="brand'+(vendorFilter===""?" on":"")+'" data-v="">All brands</button>'
-    +brands.map(v=>'<button class="brand'+(vendorFilter===v?" on":"")+'" data-v="'+esc(v)+'">'
-      +esc(v)+'<span class="n">'+counts[v]+'</span></button>').join("");
-  box.querySelectorAll(".brand").forEach(b=>b.addEventListener("click",()=>{
-    vendorFilter=b.dataset.v; renderBrands(); render();}));
-}
 async function load(){
   try{const r=await fetch(BASE+"?action=data",{credentials:"same-origin"});
-    const j=await r.json();if(!j.ok)return;ALL=j.items||[];renderBrands();renderStats(j.stats);render();}
+    const j=await r.json();if(!j.ok)return;ALL=j.items||[];renderStats(j.stats);render();}
   catch(e){$("#list").innerHTML='<div class="empty">Failed to load</div>';}
 }
 function renderStats(s){s=s||{};$("#stats").innerHTML=
@@ -487,19 +470,20 @@ function row(e){
   const name=e.ssid?esc(e.ssid):'<span class="hidden">(hidden)</span>';
   const badge=e.caught?'<span class="badge b-caught">🏆 caught</span>':'<span class="badge b-seen">👁 seen</span>';
   const pwb=e.pw?'<span class="badge b-pw">🔑</span>':'';
+  const pcap=e.hp?'<a class="dlmini" href="'+BASE+'?action=pcap&mac='+encodeURIComponent(e.mac)
+    +'" onclick="event.stopPropagation()" title="save the handshake file">💾 .pcap</a>':'';
   return '<div class="row '+(e.caught?'caught':'seen')+'" data-mac="'+esc(e.mac)+'">'
    +'<div class="head" onclick="toggle(this)">'
    +'<div><div class="ssid">'+name+' '+pwb+'</div>'
    +'<div class="meta">'+esc(e.vendor||"—")+' · '+esc(e.mac)+' · '+esc(e.enc||"?")
    +' · ch'+(e.ch||"?")+' · '+fmtAge(e.last)+' ago</div></div>'
-   +badge+'</div>'
+   +'<div class="rt">'+badge+pcap+'</div></div>'
    +'<div class="det">'
    +'<div class="fld"><label>Password</label><div class="pwline">'
    +'<input type="text" class="pw" value="'+esc(e.pw||"")+'" placeholder="none">'
    +'<button class="btn save" onclick="save(this)">💾</button></div>'
    +'<div class="pwstatus"></div></div>'
    +'<div class="fld"><label>Note</label><input type="text" class="note" value="'+esc(e.note||"")+'" placeholder="—"></div>'
-   +(e.hp?'<a class="dl" href="'+BASE+'?action=pcap&mac='+encodeURIComponent(e.mac)+'">⬇ Download .pcap (handshake)</a>':'')
    +'</div></div>';
 }
 function toggle(h){h.parentElement.querySelector(".det").classList.toggle("open");}

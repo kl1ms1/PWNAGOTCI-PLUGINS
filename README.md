@@ -50,7 +50,7 @@ Short version with troubleshooting — [`docs/INSTALLING.md`](docs/INSTALLING.md
 | Plugin | Version | Status | What it does |
 |--------|--------|--------|--------------|
 | [bootlogo](plugins/bootlogo/) | 0.4.7 | ✅ | Custom boot logo: photo in the browser → auto-fit for e-ink → show on screen and at power-on |
-| [pwndex](plugins/pwndex/) | 0.5.0 | ✅ | Network "pokedex": catalog, search, browse by brand, passwords (save + export), .pcap download; your networks → whitelist |
+| [pwndex](plugins/pwndex/) | 0.6.0 | ✅ | Network "pokedex": catalog, search, passwords (save + export), save .pcap per catch; your networks → whitelist |
 | [callout](plugins/callout/) | 0.5.0 | ✅ | pwnagotchi calls out the deauth victim by name instead of MAC (+ test button shows it on screen) |
 | [brain](plugins/brain/) | 0.3.0 | ✅ | AI agent (bandit): learns and picks scanning channels; on a decision the face turns into `(A_I)` and speaks |
 

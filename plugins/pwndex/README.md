@@ -11,14 +11,12 @@ Open: `http://<ip>:8080/plugins/pwndex/`
 - **Seen / Caught** like a pokedex: 👁 just seen vs 🏆 handshake captured.
 - **Search** by SSID / vendor / MAC (instant) + filters (all / caught / with
   password / seen only).
-- **Browse by brand**: clickable vendor chips (Xiaomi, TP-Link, Apple…), like a
-  marketplace — each shows how many networks that brand has.
 - **Passwords**: type them in manually OR pull them from `wpa-sec.cracked.potfile`
   (the "↻ Refresh from wpa-sec" button); peek at them later. Plus per-network notes.
 - **Export passwords**: the "⬇ Export passwords (.txt)" button downloads all saved
   passwords as a text file (SSID / MAC / vendor / password).
-- **Download .pcap**: for caught networks, grab the captured handshake file right
-  from the entry.
+- **Save .pcap**: every caught network shows a "💾 .pcap" button right next to its
+  badge — one click saves the captured handshake file (to decrypt/analyze elsewhere).
 - **Auto-whitelist**: the moment you save a password for a network (your own), it's
   auto-added to `main.whitelist` so pwnagotchi won't attack it — the UI confirms with
   "saved ✓ · added to whitelist 🔒".
