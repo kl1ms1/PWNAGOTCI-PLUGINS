@@ -53,6 +53,14 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.2.0
+- Position 2 reworked into a **tabbed dashboard** that **fully pauses hunting** and
+  **auto-rotates tabs**: 🏆 Охота (stats + connection + QR placeholder) · 🖥 Система
+  (temp/CPU/mem graphs + SD) · 🎞 Комикс (procedural 3-frame) · 🔑 Пароли (Cracked
+  networks from wpa-sec/pwndex + Nearby) · ⭐ №5 (reserved).
+- Per-tab durations (Система 15s, Пароли 10s, others 5s); live data.
+- Handshake totals + day streak persisted to survive reboots (no battery needed).
+
 ### 0.1.0
 - First version of the **virtual slider** (web): 3 positions — **Auto** (hunt),
   **Dashboard** (pauses hunting + a carousel of temp/CPU/memory/uptime mini-charts

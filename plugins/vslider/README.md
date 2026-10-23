@@ -6,14 +6,23 @@ A **virtual slider** for pwnagotchi (web UI) — a stand-in for the future hardw
 Open: `http://<ip>:8080/plugins/vslider/`
 
 ## Positions
-1. **Auto** — normal hunting (resumes `wifi.recon`).
-2. **Dashboard** — **pauses hunting** (`wifi.recon off`) and shows a **carousel** of
-   mini-charts that **rotates every 5 seconds** (tap to flip): temperature, CPU,
-   memory (sparklines) and uptime.
-3. **???** — reserved; we'll decide what it does (ideas: Sync upload to wpa-sec,
-   disguise mode, e-ink carousel).
+1. **Auto** — normal pwnagotchi hunting (resumes `wifi.recon`).
+2. **Dashboard** — **fully pauses hunting** (`wifi.recon off`, like manual mode — nothing
+   is searched, radio quiet, easy on battery/heat) and shows a **tabbed dashboard**
+   whose tabs **auto-rotate**:
+   - 🏆 **Охота** (5s) — hunt stats (hashes/min, total, session, temp, networks/with-password,
+     caught/seen, top channel, nearby, streak, status) + a connection line + a QR placeholder.
+   - 🖥 **Система** (15s) — temperature / CPU / memory with live sparklines + SD card.
+   - 🎞 **Комикс** (5s) — a procedural 3-frame "comic of the day" (generated from state,
+     no hand-drawn art).
+   - 🔑 **Пароли** (10s = 2×5s) — **Cracked networks** (from wpa-sec 🟦 and pwndex 🟨) and
+     **Nearby** (visible networks, with password first, "нет пароля" last).
+   - ⭐ **№5** (5s) — reserved.
+3. **???** — reserved.
 
-The chosen position persists across restarts (`/root/.vslider/state.json`).
+The chosen position persists across restarts (`/root/.vslider/state.json`). Handshake
+totals and the day streak are kept in `/root/.vslider/stats.json` (survive reboots —
+important without a battery).
 
 ## Install
 ```bash
@@ -22,10 +31,20 @@ sudo nano /etc/pwnagotchi/config.toml   # main.plugins.vslider.enabled = true
 sudo systemctl restart pwnagotchi
 ```
 
-## v1 scope
-Web-only. The e-ink carousel on the device and the real Sync (connect to your own
-network → upload to wpa-sec) come next. Metrics are sampled each epoch into a short
-rolling history for the sparklines.
+## Options
+| Key | Default | Description |
+|---|---|---|
+| `enabled` | — | turn it on |
+| `ap_ssid` / `ap_pass` | `pwn-ap` / `changeme` | shown on the connection line (and future QR) |
+| `web` | `http://10.0.0.2:8080` | web UI link on the connection line |
+| `pwndex` | `/root/.pwndex/dex.json` | pwndex catalog for the passwords tab |
 
-> ⚠️ Pausing uses bettercap's `wifi.recon off/on` at runtime — it doesn't touch your
-> config. Your own networks / authorized tests only.
+## v1 notes
+- Web-only. The e-ink carousel on the device comes later.
+- The **Wi-Fi-join QR** and the real **Sync** upload (connect to your own network →
+  wpa-sec) need the device to raise its own AP — that's the planned **Sync/position 3**,
+  so the QR is a placeholder for now and the connection details are shown as text.
+- Passwords are read from wpa-sec + pwndex — displayed for **your own networks /
+  authorized tests only**.
+
+> ⚠️ Your own networks / authorized tests only.

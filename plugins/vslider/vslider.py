@@ -1,18 +1,24 @@
 """
-vslider — a VIRTUAL slider for pwnagotchi (web UI), a stand-in for the future
+vslider — a VIRTUAL slider for pwnagotchi (web UI), stand-in for the future
 hardware 3-position switch.
 
-You flip between 3 positions in the web page (opened like pwndex/brain):
-
-  1. Auto      — normal hunting (resumes wifi recon).
-  2. Dashboard — PAUSES hunting (wifi.recon off) and shows live mini-charts:
-                 temperature / CPU / memory (sparklines) + uptime.
-  3. ???       — reserved ("coming soon"); we'll decide what it does later.
+Positions:
+  1. Auto      — normal pwnagotchi hunting (resumes wifi recon).
+  2. Dashboard — FULLY pauses hunting (wifi.recon off — like manual mode, nothing
+                 is searched, radio quiet) and shows a tabbed dashboard:
+                   • Охота   — hunt stats + connection info (+ QR placeholder)
+                   • Система — temp / CPU / memory / SD, live graphs
+                   • Комикс  — a procedural 3-frame "comic of the day"
+                   • Пароли  — Cracked networks (wpa-sec + pwndex) + nearby
+                   • №5      — reserved
+                 Tabs auto-rotate (Охота 5s · Система 15s · Комикс 5s ·
+                 Пароли 10s(2×5s) · №5 5s). Values refresh live.
+  3. ???       — reserved.
 
 Open: http://<ip>:8080/plugins/vslider/
 
-v1 is web-only. The e-ink carousel and the real Sync upload (connect to your own
-network -> wpa-sec) come later.
+v1 is web-only. The real Wi-Fi-join QR and Sync upload come with the AP/Sync
+feature (position 3). Your own networks / authorized tests only.
 """
 
 import json
@@ -23,64 +29,88 @@ from collections import deque
 
 import pwnagotchi.plugins as plugins
 
-HIST = 60   # how many samples to keep per metric (sparkline length)
-
-POS_AUTO = 1
-POS_DASH = 2
-POS_X = 3
+POS_AUTO, POS_DASH, POS_X = 1, 2, 3
+HIST = 60
 
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
     __license__ = "MIT"
-    __description__ = "Virtual 3-position slider: Auto / Dashboard / reserved (web UI)."
+    __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
     def __init__(self):
         self._dir = "/root/.vslider"
         self._state_f = os.path.join(self._dir, "state.json")
+        self._stats_f = os.path.join(self._dir, "stats.json")
         self._pos = POS_AUTO
         self._agent = None
         self._cpu_prev = None
-        self._hist = {"temp": deque(maxlen=HIST),
-                      "cpu": deque(maxlen=HIST),
+        self._hist = {"temp": deque(maxlen=HIST), "cpu": deque(maxlen=HIST),
                       "mem": deque(maxlen=HIST)}
-        self._last = {"temp": 0, "cpu": 0, "mem": 0, "uptime": 0}
+        self._nearby = []                 # current scan: [{ssid,mac,ch,rssi}]
+        self._hs_total = 0                # all-time handshakes (persisted)
+        self._hs_session = 0
+        self._hs_times = deque(maxlen=500)  # timestamps for rate
+        self._streak = 0
+        self._last_day = ""
+        # paths (resolved on ready)
+        self._dex_f = "/root/.pwndex/dex.json"
+        self._hs_dir = "/home/pi/handshakes"
+        self._potfile = os.path.join(self._hs_dir, "wpa-sec.cracked.potfile")
+        self._conn = {"ssid": "pwn-ap", "pass": "changeme", "web": ""}
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
         os.makedirs(self._dir, exist_ok=True)
-        self._load()
-        logging.info("[vslider] loaded (position=%d)", self._pos)
+        o = self.options or {}
+        self._conn["ssid"] = o.get("ap_ssid", self._conn["ssid"])
+        self._conn["pass"] = o.get("ap_pass", self._conn["pass"])
+        self._conn["web"] = o.get("web", self._conn["web"])
+        self._dex_f = o.get("pwndex", self._dex_f)
+        self._load_state()
+        self._load_stats()
+        logging.info("[vslider] loaded (pos=%d, hs_total=%d)", self._pos, self._hs_total)
 
     def on_ready(self, agent):
         self._agent = agent
+        try:
+            cfg = agent.config()
+            self._hs_dir = cfg["bettercap"].get("handshakes", self._hs_dir)
+            self._potfile = os.path.join(self._hs_dir, "wpa-sec.cracked.potfile")
+            if not self._conn["web"]:
+                self._conn["web"] = "http://10.0.0.2:8080"
+        except Exception:
+            pass
         self._apply()
 
     def on_epoch(self, agent, epoch, epoch_data):
         self._agent = agent
-        self._sample()
-        # keep hunting paused while on the Dashboard (pwnagotchi may re-enable it)
+        self._sample_sys()
         if self._pos == POS_DASH:
-            self._run("wifi.recon off")
+            self._run("wifi.recon off")   # keep hunting fully paused
 
-    # --- state -------------------------------------------------------------
-    def _load(self):
-        try:
-            with open(self._state_f, encoding="utf-8") as f:
-                self._pos = int(json.load(f).get("pos", POS_AUTO))
-        except Exception:
-            self._pos = POS_AUTO
+    def on_handshake(self, agent, filename, access_point, client_station):
+        self._hs_total += 1
+        self._hs_session += 1
+        now = int(time.time())
+        self._hs_times.append(now)
+        self._bump_streak(now)
+        self._save_stats()
 
-    def _save(self):
+    def on_wifi_update(self, agent, access_points):
         try:
-            tmp = self._state_f + ".tmp"
-            with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"pos": self._pos}, f)
-            os.replace(tmp, self._state_f)
+            near = []
+            for ap in access_points or []:
+                mac = (ap.get("mac") or ap.get("bssid") or "").upper()
+                near.append({"ssid": ap.get("hostname") or ap.get("essid") or ap.get("ssid") or "",
+                             "mac": mac, "ch": ap.get("channel") or 0,
+                             "rssi": ap.get("rssi") or -99})
+            self._nearby = near
         except Exception:
             pass
 
+    # --- position ----------------------------------------------------------
     def _run(self, cmd):
         if self._agent is None:
             return
@@ -90,12 +120,54 @@ class Vslider(plugins.Plugin):
             logging.debug("[vslider] run failed: %s", cmd)
 
     def _apply(self):
-        """Apply the current position's side effect."""
         if self._pos == POS_AUTO:
-            self._run("wifi.recon on")      # resume hunting
+            self._run("wifi.recon on")
         elif self._pos == POS_DASH:
-            self._run("wifi.recon off")     # pause hunting
-        # POS_X: nothing yet
+            self._run("wifi.recon off")
+
+    # --- persistence -------------------------------------------------------
+    def _load_state(self):
+        try:
+            with open(self._state_f, encoding="utf-8") as f:
+                self._pos = int(json.load(f).get("pos", POS_AUTO))
+        except Exception:
+            self._pos = POS_AUTO
+
+    def _save_state(self):
+        try:
+            with open(self._state_f + ".tmp", "w", encoding="utf-8") as f:
+                json.dump({"pos": self._pos}, f)
+            os.replace(self._state_f + ".tmp", self._state_f)
+        except Exception:
+            pass
+
+    def _load_stats(self):
+        try:
+            with open(self._stats_f, encoding="utf-8") as f:
+                d = json.load(f)
+            self._hs_total = int(d.get("hs_total", 0))
+            self._streak = int(d.get("streak", 0))
+            self._last_day = d.get("last_day", "")
+        except Exception:
+            pass
+
+    def _save_stats(self):
+        try:
+            with open(self._stats_f + ".tmp", "w", encoding="utf-8") as f:
+                json.dump({"hs_total": self._hs_total, "streak": self._streak,
+                           "last_day": self._last_day}, f)
+            os.replace(self._stats_f + ".tmp", self._stats_f)
+        except Exception:
+            pass
+
+    def _bump_streak(self, now):
+        day = time.strftime("%Y-%m-%d", time.localtime(now))
+        if day == self._last_day:
+            return
+        # new active day: if it's the very next day keep streak, else reset to 1
+        yday = time.strftime("%Y-%m-%d", time.localtime(now - 86400))
+        self._streak = self._streak + 1 if self._last_day == yday else 1
+        self._last_day = day
 
     # --- metrics -----------------------------------------------------------
     def _read_temp(self):
@@ -113,8 +185,7 @@ class Vslider(plugins.Plugin):
             total = sum(parts)
             pct = 0.0
             if self._cpu_prev:
-                dt = total - self._cpu_prev[0]
-                di = idle - self._cpu_prev[1]
+                dt, di = total - self._cpu_prev[0], idle - self._cpu_prev[1]
                 pct = 100.0 * (dt - di) / dt if dt > 0 else 0.0
             self._cpu_prev = (total, idle)
             return round(max(0.0, min(100.0, pct)), 1)
@@ -141,32 +212,145 @@ class Vslider(plugins.Plugin):
         except Exception:
             return 0
 
-    def _sample(self):
-        t = self._read_temp()
-        c = self._read_cpu()
-        m = self._read_mem()
-        u = self._read_uptime()
-        self._hist["temp"].append(t)
-        self._hist["cpu"].append(c)
-        self._hist["mem"].append(m)
-        self._last = {"temp": t, "cpu": c, "mem": m, "uptime": u}
+    def _read_sd(self):
+        try:
+            st = os.statvfs("/")
+            total = st.f_blocks * st.f_frsize
+            free = st.f_bavail * st.f_frsize
+            used_pct = round(100.0 * (total - free) / total, 1) if total else 0.0
+            free_gb = round(free / (1024 ** 3), 1)
+            return used_pct, free_gb
+        except Exception:
+            return 0.0, 0.0
+
+    def _sample_sys(self):
+        self._hist["temp"].append(self._read_temp())
+        self._hist["cpu"].append(self._read_cpu())
+        self._hist["mem"].append(self._read_mem())
+
+    # --- pwndex / wpa-sec --------------------------------------------------
+    def _read_dex(self):
+        try:
+            with open(self._dex_f, encoding="utf-8") as f:
+                return json.load(f)
+        except Exception:
+            return {}
+
+    def _potfile_ssids(self):
+        """Set of (ssid_lower, mac_upper) that appear in the wpa-sec potfile."""
+        ssids, macs = set(), set()
+        try:
+            with open(self._potfile, encoding="utf-8", errors="ignore") as f:
+                for ln in f:
+                    for sep in ("*", ":"):
+                        if sep in ln:
+                            p = ln.strip().split(sep)
+                            if len(p) >= 4:
+                                m = p[0].replace(":", "").replace("-", "").lower()
+                                if len(m) == 12:
+                                    macs.add(":".join(m[i:i+2] for i in range(0, 12, 2)).upper())
+                                try:
+                                    ssids.add(bytes.fromhex(p[2]).decode("utf-8", "ignore").lower())
+                                except Exception:
+                                    ssids.add(p[2].lower())
+                            break
+        except Exception:
+            pass
+        return ssids, macs
+
+    def _src_of(self, e, pot_ssids, pot_macs):
+        mac = (e.get("mac") or "").upper()
+        ssid = (e.get("ssid") or "").lower()
+        if mac in pot_macs or (ssid and ssid in pot_ssids):
+            return "wpa"
+        return "pdx"
+
+    def _cracked(self, dex, pot_ssids, pot_macs):
+        items = [e for e in dex.values() if e.get("pw")]
+        items.sort(key=lambda e: e.get("last", 0), reverse=True)   # newest first
+        out = []
+        for e in items[:50]:
+            out.append({"ssid": e.get("ssid") or "(hidden)", "pw": e.get("pw"),
+                        "src": self._src_of(e, pot_ssids, pot_macs)})
+        return out
+
+    def _nearby_list(self, dex, pot_ssids, pot_macs):
+        by_mac = {(k or "").upper(): v for k, v in dex.items()}
+        withpw, nopw = [], []
+        seen = set()
+        for ap in self._nearby:
+            mac = ap["mac"]
+            if not mac or mac in seen:
+                continue
+            seen.add(mac)
+            e = by_mac.get(mac)
+            name = ap["ssid"] or (e.get("ssid") if e else "") or "(hidden)"
+            if e and e.get("pw"):
+                withpw.append({"ssid": name, "pw": e["pw"],
+                               "src": self._src_of(e, pot_ssids, pot_macs), "rssi": ap["rssi"]})
+            else:
+                nopw.append({"ssid": name, "pw": "", "src": "non", "rssi": ap["rssi"]})
+        withpw.sort(key=lambda x: x["rssi"], reverse=True)
+        nopw.sort(key=lambda x: x["rssi"], reverse=True)
+        return withpw + nopw[:30]
+
+    # --- data assembly -----------------------------------------------------
+    def _hunt(self, dex):
+        now = int(time.time())
+        per_min = sum(1 for t in self._hs_times if t >= now - 60)
+        with_pw = sum(1 for e in dex.values() if e.get("pw"))
+        total_nets = len(dex)
+        caught = sum(1 for e in dex.values() if e.get("caught"))
+        ch = {}
+        for ap in self._nearby:
+            if ap["ch"]:
+                ch[ap["ch"]] = ch.get(ap["ch"], 0) + 1
+        top_ch = max(ch, key=ch.get) if ch else "-"
+        return {"total": self._hs_total, "session": self._hs_session, "per_min": per_min,
+                "temp": self._read_temp(), "nets_total": total_nets, "nets_pw": with_pw,
+                "caught": caught, "seen": total_nets, "top_ch": top_ch,
+                "nearby": len(self._nearby), "streak": self._streak,
+                "status": "на охоте" if self._pos == POS_AUTO else "на паузе"}
+
+    def _sys(self):
+        used, free = self._read_sd()
+        return {"temp": self._read_temp(), "cpu": self._read_cpu(), "mem": self._read_mem(),
+                "sd_used": used, "sd_free": free, "uptime": self._read_uptime(),
+                "h": {k: list(v) for k, v in self._hist.items()}}
+
+    def _comic(self, hunt):
+        """3 procedural frames based on state (no hand-drawn art)."""
+        hot = hunt["per_min"] > 0
+        hour = int(time.strftime("%H"))
+        morning = 5 <= hour < 11
+        night = hour >= 23 or hour < 5
+        if night:
+            return [{"f": "(-_-) zzz", "c": "ночь, сплю…"},
+                    {"f": "(._.)", "c": "кто там?"},
+                    {"f": "(-_-) zzz", "c": "ладно, дальше спать"}]
+        if hot:
+            return [{"f": "(•‿•)", "c": "утро! эфир спит" if morning else "слушаю эфир"},
+                    {"f": "(⌐■_■)", "c": "о, добыча!"},
+                    {"f": "(♥‿♥)", "c": "+%d рукопожатий!" % hunt["per_min"]}]
+        return [{"f": "(•‿•)", "c": "доброе утро!" if morning else "на дежурстве"},
+                {"f": "(・_・)", "c": "ищу цели…"},
+                {"f": "(ー_ー)", "c": "тихо сегодня"}]
 
     # --- web ---------------------------------------------------------------
     def on_webhook(self, path, request):
         from flask import jsonify, abort
         if request.method == "GET":
             if request.args.get("action") == "data":
-                # sample once on demand too, so the page isn't empty before the first epoch
-                if not self._hist["temp"]:
-                    self._sample()
-                return jsonify(ok=True, pos=self._pos,
-                               last=self._last,
-                               hist={k: list(v) for k, v in self._hist.items()})
+                dex = self._read_dex()
+                pot_ssids, pot_macs = self._potfile_ssids()
+                hunt = self._hunt(dex)
+                return jsonify(ok=True, pos=self._pos, hunt=hunt, sys=self._sys(),
+                               cracked=self._cracked(dex, pot_ssids, pot_macs),
+                               nearby=self._nearby_list(dex, pot_ssids, pot_macs),
+                               comic=self._comic(hunt), conn=self._conn)
             if path in (None, "", "/"):
                 return self._page()
             abort(404)
-
-        # POST
         body = {}
         try:
             raw = request.get_data(as_text=True)
@@ -183,7 +367,7 @@ class Vslider(plugins.Plugin):
                 return jsonify(ok=False, msg="bad pos"), 400
             self._pos = pos
             self._apply()
-            self._save()
+            self._save_state()
             return jsonify(ok=True, pos=self._pos)
         abort(404)
 
@@ -200,125 +384,159 @@ class Vslider(plugins.Plugin):
 _PAGE = r"""<!doctype html><html><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>vslider</title><style>
-:root{color-scheme:dark;--bg:#0d1117;--card:#161b22;--line:#30363d;--mut:#8b949e;--fg:#e6edf3;--acc:#1f6feb;--ok:#238636;--warn:#d29922}
+:root{color-scheme:dark;--bg:#0d1117;--card:#161b22;--line:#30363d;--mut:#8b949e;--fg:#e6edf3;--acc:#1f6feb;--ok:#238636;--gold:#d29922;--pur:#6e40c9}
 *{box-sizing:border-box}
-body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);margin:0;padding:16px;line-height:1.4}
-.wrap{max-width:640px;margin:0 auto}h1{font-size:1.3rem;margin:.2em 0}
-.sub{color:var(--mut);font-size:.82rem;margin-bottom:14px}
-.slider{display:flex;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:6px;gap:6px;position:relative}
-.pos{flex:1;text-align:center;padding:14px 8px;border-radius:10px;cursor:pointer;user-select:none;font-weight:600;transition:.15s}
-.pos small{display:block;font-weight:400;color:var(--mut);font-size:.72rem;margin-top:3px}
-.pos.on{color:#fff}
-.pos.on small{color:#dbe7ff}
-.pos.on[data-p="1"]{background:var(--ok)}
-.pos.on[data-p="2"]{background:var(--acc)}
-.pos.on[data-p="3"]{background:#6e40c9}
-.panel{margin-top:16px}
+body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:var(--fg);margin:0;padding:14px;line-height:1.4}
+.wrap{max-width:460px;margin:0 auto}h1{font-size:1.25rem;margin:.2em 0}
+.sub{color:var(--mut);font-size:.8rem;margin-bottom:12px}
+.slider{display:flex;background:var(--card);border:1px solid var(--line);border-radius:14px;padding:6px;gap:6px}
+.pos{flex:1;text-align:center;padding:12px 6px;border-radius:10px;cursor:pointer;font-weight:600;transition:.15s;font-size:.9rem}
+.pos small{display:block;font-weight:400;color:var(--mut);font-size:.68rem;margin-top:3px}
+.pos.on{color:#fff}.pos.on small{color:#dbe7ff}
+.pos.on[data-p="1"]{background:var(--ok)}.pos.on[data-p="2"]{background:var(--acc)}.pos.on[data-p="3"]{background:var(--pur)}
+.panel{margin-top:14px}
 .status{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:16px;text-align:center}
-.status .big{font-size:1.1rem;font-weight:600}
-.status .hint{color:var(--mut);font-size:.82rem;margin-top:4px}
-.cards{display:grid;grid-template-columns:1fr 1fr;gap:10px}
-.mcard{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px}
-.mcard .lbl{color:var(--mut);font-size:.78rem}
-.mcard .val{font-size:1.5rem;font-weight:700;margin:2px 0}
-.mcard .unit{font-size:.9rem;color:var(--mut);font-weight:400}
-.spark{width:100%;height:38px;display:block}
-.carousel{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:18px;text-align:center;cursor:pointer}
-.slidelbl{color:var(--mut);font-size:.9rem}
-.slideval{font-size:2.4rem;font-weight:800;margin:6px 0}
-.slideval .unit{font-size:1.1rem;color:var(--mut);font-weight:400}
-.carousel .spark{height:54px;margin-top:6px}
-.dots{display:flex;gap:7px;justify-content:center;margin-top:14px}
-.dot{width:8px;height:8px;border-radius:50%;background:var(--line);transition:.2s}
-.dot.on{background:var(--acc);transform:scale(1.25)}
-.carhint{color:var(--mut);font-size:.72rem;margin-top:8px}
-.muted{color:var(--mut);font-size:.78rem;text-align:center;margin-top:16px}
+.status .big{font-size:1.05rem;font-weight:600}.status .hint{color:var(--mut);font-size:.82rem;margin-top:4px}
+.win{background:var(--card);border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.tabs{display:flex;background:#0b0f14;border-bottom:1px solid var(--line)}
+.tb{flex:1;text-align:center;padding:9px 2px;font-size:11px;color:var(--mut);border-right:1px solid #22262d;white-space:nowrap}
+.tb:last-child{border-right:0}.tb.on{background:var(--card);color:#fff;font-weight:700;box-shadow:inset 0 -3px 0 var(--acc)}
+.bd{padding:13px;min-height:220px}
+.row{display:flex;gap:12px}
+.qr{width:104px;height:104px;background:#223;border:1px dashed #456;border-radius:8px;display:flex;align-items:center;justify-content:center;color:#8aa;font-size:10px;text-align:center;padding:6px}
+.qrcap{font-size:9px;color:var(--mut);text-align:center;margin-top:4px}
+.ul{margin-top:4px}
+.u,.s{display:flex;justify-content:space-between;font-size:12px;padding:3px 0;border-bottom:1px dashed #22262d}
+.u .k,.s .k{color:var(--mut)}.u .v,.s .v{font-weight:700}
+.right{flex:1}.s.fun .k{color:var(--gold)}
+.conn{margin-top:9px;font-size:10px;color:#79b8ff;text-align:center;background:#0b0f14;border:1px solid #22262d;border-radius:7px;padding:5px 8px}
+.grid{display:grid;grid-template-columns:1fr 1fr;gap:9px}
+.q{background:#0b0f14;border:1px solid var(--line);border-radius:11px;padding:11px}
+.q .ql{color:var(--mut);font-size:12px;display:flex;justify-content:space-between;align-items:baseline}
+.q .qv{font-weight:800;font-size:18px}.q .qv small{font-size:11px;color:var(--mut);font-weight:400}
+.spk{width:100%;height:38px;display:block;margin-top:6px}
+.frames{display:flex;gap:8px}
+.frame{flex:1;background:#0b0f14;border:1px solid var(--line);border-radius:11px;padding:12px 6px;text-align:center}
+.face{font-size:20px;font-weight:700}.cap{color:#c9d1d9;font-size:11px;margin-top:8px;min-height:30px}
+.ttl{text-align:center;font-size:15px;font-weight:800;margin-bottom:8px}
+.cols{display:grid;grid-template-columns:1fr 1fr;gap:2px 14px}
+.e{display:flex;align-items:center;font-size:11.5px;padding:2.5px 0;border-bottom:1px dashed #1c2128}
+.e .n{color:var(--mut);width:20px;flex:0 0 20px}
+.src{width:8px;height:8px;border-radius:2px;flex:0 0 8px;margin-right:5px}
+.wpa{background:var(--acc)}.pdx{background:var(--gold)}.non{background:#30363d}
+.e .ssid{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:78px}
+.e .dash{color:var(--mut);margin:0 4px}.e .p{font-family:ui-monospace,monospace;color:#7ee2a0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.e .no{color:var(--mut);font-style:italic}
+.legend{display:flex;gap:12px;justify-content:center;font-size:10px;color:var(--mut);margin-top:9px}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
+.subdots{display:flex;gap:6px;justify-content:center;margin-top:9px}
+.sd2{width:28px;height:4px;border-radius:3px;background:#30363d}.sd2.on{background:var(--gold)}
+.muted{color:var(--mut);font-size:.76rem;text-align:center;margin-top:12px}
 </style></head><body><div class="wrap">
-<h1>🎚️ vslider</h1>
-<div class="sub">Virtual slider · v1 (web) · flip a position below</div>
-
+<h1>🎚️ vslider</h1><div class="sub">виртуальный слайдер · v1 (web)</div>
 <div class="slider" id="slider">
   <div class="pos" data-p="1">Auto<small>охота идёт</small></div>
   <div class="pos" data-p="2">Dashboard<small>пауза + инфа</small></div>
   <div class="pos" data-p="3">???<small>скоро</small></div>
 </div>
-
 <div class="panel" id="panel"></div>
-<div class="muted">pwnagotchi · your own networks only 🫡</div>
+<div class="muted">pwnagotchi · только свои сети / авторизованный тест 🫡</div>
 </div>
 <script>
 const BASE="/plugins/vslider/", CSRF="__CSRF__";
 const $=s=>document.querySelector(s);
-let POS=1, DATA=null, carIdx=0, carTimer=null;
-
-// Position 2 is a CAROUSEL — these slides auto-rotate every 5s (tap to flip).
-const SLIDES=[
-  {k:"temp", lbl:"🌡 Температура", unit:"°C", color:"#f0883e", lo:null, hi:null},
-  {k:"cpu",  lbl:"⚙️ CPU",        unit:"%",  color:"#1f6feb", lo:0, hi:100},
-  {k:"mem",  lbl:"🧠 Память",      unit:"%",  color:"#2ea043", lo:0, hi:100},
-  {k:"up",   lbl:"⏱ Аптайм",      unit:"",   color:"#8b949e"},
+let POS=1, D=null, tabIdx=0, pwSub=0, tabTimer=null, subTimer=null;
+const TABS=[
+  {id:"hunt",lbl:"🏆 Охота",dur:5000},
+  {id:"sys", lbl:"🖥 Система",dur:15000},
+  {id:"comic",lbl:"🎞 Комикс",dur:5000},
+  {id:"pw",  lbl:"🔑 Пароли",dur:10000},
+  {id:"x5",  lbl:"⭐ №5",dur:5000},
 ];
+function esc(s){return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
+function spark(a,col,lo,hi){a=a||[];const W=200,H=38,n=a.length;
+  if(n<2)return '<svg class="spk" viewBox="0 0 '+W+' '+H+'"></svg>';
+  if(lo==null){lo=Math.min(...a);hi=Math.max(...a);}if(hi<=lo)hi=lo+1;
+  const p=a.map((v,i)=>(i/(n-1)*W).toFixed(1)+','+(H-2-((v-lo)/(hi-lo))*(H-4)).toFixed(1)).join(' ');
+  return '<svg class="spk" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none"><polyline fill="none" stroke="'+col+'" stroke-width="2" points="'+p+'"/></svg>';}
+function upt(s){s=s||0;const d=(s/86400)|0,h=(s%86400/3600)|0,m=(s%3600/60)|0;return d?d+"д "+h+"ч":h?h+"ч "+m+"м":m+"м";}
 
-function spark(arr, color, lo, hi){
-  arr=arr||[]; const W=200,H=54,n=arr.length;
-  if(n<2) return '<svg class="spark" viewBox="0 0 '+W+' '+H+'"></svg>';
-  if(lo==null){lo=Math.min(...arr); hi=Math.max(...arr);}
-  if(hi<=lo)hi=lo+1;
-  const pts=arr.map((v,i)=>{
-    const x=i/(n-1)*W, y=H-2-((v-lo)/(hi-lo))*(H-4);
-    return x.toFixed(1)+','+y.toFixed(1);}).join(' ');
-  return '<svg class="spark" viewBox="0 0 '+W+' '+H+'" preserveAspectRatio="none">'
-    +'<polyline fill="none" stroke="'+color+'" stroke-width="2" points="'+pts+'"/></svg>';
+function tabsBar(act){return '<div class="tabs">'+TABS.map(t=>'<div class="tb'+(t.id===act?' on':'')+'">'+t.lbl+'</div>').join('')+'</div>';}
+function pwRows(list,withNo){
+  const n=list.length, half=Math.ceil(n/2);
+  function cell(e,i){
+    const inner = (e.pw||!withNo)?'<span class="dash">-</span><span class="p">'+esc(e.pw)+'</span>'
+      :'<span class="dash">-</span><span class="no">нет пароля</span>';
+    return '<div class="e"><span class="n">'+(i+1)+'.</span><span class="src '+e.src+'"></span>'
+      +'<span class="ssid">'+esc(e.ssid)+'</span>'+inner+'</div>';
+  }
+  let L="",R="";
+  list.forEach((e,i)=>{(i<half?L+=cell(e,i):R+=cell(e,i));});
+  return '<div class="cols"><div>'+L+'</div><div>'+R+'</div></div>';
 }
-function fmtUptime(s){s=s||0;const d=Math.floor(s/86400),h=Math.floor(s%86400/3600),m=Math.floor(s%3600/60);
-  if(d)return d+"д "+h+"ч";if(h)return h+"ч "+m+"м";return m+"м";}
-
-function slideHtml(i){
-  const s=SLIDES[i], L=(DATA&&DATA.last)||{}, h=(DATA&&DATA.hist)||{};
-  let val, spk="";
-  if(s.k==="up"){ val=fmtUptime(L.uptime); }
-  else{ val=(L[s.k]||0)+'<span class="unit"> '+s.unit+'</span>'; spk=spark(h[s.k],s.color,s.lo,s.hi); }
-  const dots=SLIDES.map((_,j)=>'<span class="dot'+(j===i?' on':'')+'"></span>').join('');
-  return '<div class="slidelbl">'+s.lbl+'</div><div class="slideval">'+val+'</div>'+spk
-    +'<div class="dots">'+dots+'</div>'
-    +'<div class="carhint">меняется каждые 5 сек · нажми, чтобы листнуть</div>';
-}
-function restartCar(){
-  clearInterval(carTimer); carTimer=null;
-  if(POS===2) carTimer=setInterval(()=>{carIdx=(carIdx+1)%SLIDES.length; renderPanel();},5000);
+function renderTab(){
+  if(!D)return "";
+  const t=TABS[tabIdx].id;
+  if(t==="hunt"){const h=D.hunt,c=D.conn||{};
+    return '<div class="row"><div><div class="qr">QR Wi-Fi<br>(с Sync)</div><div class="qrcap">скан → коннект</div>'
+      +'<div class="ul"><div class="u"><span class="k">Хеш/мин</span><span class="v">'+h.per_min+'</span></div>'
+      +'<div class="u"><span class="k">Всего</span><span class="v">'+h.total+'</span></div>'
+      +'<div class="u"><span class="k">За сессию</span><span class="v">'+h.session+'</span></div></div></div>'
+      +'<div class="right"><div class="s"><span class="k">Температура</span><span class="v">'+h.temp+' °C</span></div>'
+      +'<div class="s"><span class="k">Сетей / с паролем</span><span class="v">'+h.nets_total+' | '+h.nets_pw+'</span></div>'
+      +'<div class="s"><span class="k">Поймано / видел</span><span class="v">'+h.caught+' / '+h.seen+'</span></div>'
+      +'<div class="s"><span class="k">Топ-канал</span><span class="v">'+h.top_ch+'</span></div>'
+      +'<div class="s"><span class="k">Сетей рядом</span><span class="v">'+h.nearby+'</span></div>'
+      +'<div class="s fun"><span class="k">🔥 Стрик</span><span class="v">'+h.streak+' дн</span></div>'
+      +'<div class="s fun"><span class="k">😎 Статус</span><span class="v">'+esc(h.status)+'</span></div></div></div>'
+      +'<div class="conn">📡 Wi-Fi: '+esc(c.ssid)+' · pass: '+esc(c.pass)+' · веб: '+esc((c.web||"").replace("http://",""))+'</div>';
+  }
+  if(t==="sys"){const s=D.sys,h=s.h||{};
+    return '<div class="grid">'
+      +'<div class="q"><div class="ql">🌡 Температура<span class="qv">'+s.temp+'<small>°C</small></span></div>'+spark(h.temp,"#f0883e",null,null)+'</div>'
+      +'<div class="q"><div class="ql">⚙️ CPU<span class="qv">'+s.cpu+'<small>%</small></span></div>'+spark(h.cpu,"#1f6feb",0,100)+'</div>'
+      +'<div class="q"><div class="ql">🧠 Память<span class="qv">'+s.mem+'<small>%</small></span></div>'+spark(h.mem,"#2ea043",0,100)+'</div>'
+      +'<div class="q"><div class="ql">💾 Карта SD<span class="qv">'+s.sd_used+'<small>%</small></span></div>'
+      +'<div style="font-size:11px;color:var(--mut);margin-top:8px">свободно '+s.sd_free+' ГБ<br>аптайм '+upt(s.uptime)+'</div></div></div>';
+  }
+  if(t==="comic"){const fr=D.comic||[];
+    return '<div class="frames">'+fr.map(f=>'<div class="frame"><div class="face">'+esc(f.f)+'</div><div class="cap">'+esc(f.c)+'</div></div>').join('')+'</div>'
+      +'<div class="muted" style="margin-top:12px">комикс дня · генерится из состояния</div>';
+  }
+  if(t==="pw"){
+    if(pwSub===0){
+      return '<div class="ttl">Cracked networks</div>'+pwRows(D.cracked||[],false)
+        +'<div class="legend"><span><i class="wpa"></i>wpa-sec</span><span><i class="pdx"></i>pwndex</span></div>'
+        +'<div class="subdots"><span class="sd2 on"></span><span class="sd2"></span></div>';
+    }
+    return '<div class="ttl">Nearby</div>'+pwRows(D.nearby||[],true)
+      +'<div class="legend"><span><i class="wpa"></i>wpa-sec</span><span><i class="pdx"></i>pwndex</span><span><i class="non"></i>нет пароля</span></div>'
+      +'<div class="subdots"><span class="sd2"></span><span class="sd2 on"></span></div>';
+  }
+  return '<div class="status"><div class="big">⭐ №5 — скоро</div><div class="hint">придумаем вместе</div></div>';
 }
 function renderPanel(){
-  if(!DATA){$("#panel").innerHTML="";return;}
-  if(POS===1){
-    $("#panel").innerHTML='<div class="status"><div class="big">🟢 Auto — охота идёт</div>'
-      +'<div class="hint">pwnagotchi сканирует и ловит рукопожатия как обычно.</div></div>';
-  }else if(POS===2){
-    $("#panel").innerHTML='<div class="status" style="margin-bottom:10px"><div class="big">⏸ Dashboard — охота на паузе</div></div>'
-      +'<div class="carousel" id="car">'+slideHtml(carIdx%SLIDES.length)+'</div>';
-    const car=$("#car");
-    if(car) car.onclick=()=>{carIdx=(carIdx+1)%SLIDES.length; renderPanel(); restartCar();};
-  }else{
-    $("#panel").innerHTML='<div class="status"><div class="big">🟣 ??? — скоро</div>'
-      +'<div class="hint">Эту позицию придумаем вместе.</div></div>';
-  }
+  if(!D){$("#panel").innerHTML="";return;}
+  if(POS===1){$("#panel").innerHTML='<div class="status"><div class="big">🟢 Auto — охота идёт</div><div class="hint">pwnagotchi сканирует и ловит как обычно.</div></div>';return;}
+  if(POS===3){$("#panel").innerHTML='<div class="status"><div class="big">🟣 ??? — скоро</div><div class="hint">придумаем (Sync / Quiet / Disguise…)</div></div>';return;}
+  $("#panel").innerHTML='<div class="win">'+tabsBar(TABS[tabIdx].id)+'<div class="bd">'+renderTab()+'</div></div>';
 }
-function paintSlider(){
-  document.querySelectorAll(".pos").forEach(p=>p.classList.toggle("on", +p.dataset.p===POS));
+function schedTab(){
+  clearTimeout(tabTimer);clearInterval(subTimer);subTimer=null;
+  if(POS!==2)return;
+  const t=TABS[tabIdx];
+  if(t.id==="pw"){pwSub=0;subTimer=setInterval(()=>{pwSub=(pwSub+1)%2;renderPanel();},5000);}
+  tabTimer=setTimeout(()=>{tabIdx=(tabIdx+1)%TABS.length;renderPanel();schedTab();},t.dur);
 }
+function paintSlider(){document.querySelectorAll(".pos").forEach(p=>p.classList.toggle("on",+p.dataset.p===POS));}
 async function load(){
   try{const j=await (await fetch(BASE+"?action=data",{credentials:"same-origin"})).json();
-    if(!j.ok)return; DATA=j;
-    if(j.pos!==POS){POS=j.pos; carIdx=0; restartCar();}
-    paintSlider(); renderPanel();}
+    if(!j.ok)return;D=j;if(j.pos!==POS){POS=j.pos;tabIdx=0;pwSub=0;schedTab();}paintSlider();renderPanel();}
   catch(e){}
 }
-async function setpos(p){
-  POS=p; carIdx=0; restartCar(); paintSlider(); renderPanel();
-  try{await fetch(BASE+"?action=setpos",{method:"POST",credentials:"same-origin",
-    headers:{"X-CSRFToken":CSRF,"Content-Type":"application/json"},body:JSON.stringify({pos:p})});}
-  catch(e){}
-  load();
-}
+async function setpos(p){POS=p;tabIdx=0;pwSub=0;schedTab();paintSlider();renderPanel();
+  try{await fetch(BASE+"?action=setpos",{method:"POST",credentials:"same-origin",headers:{"X-CSRFToken":CSRF,"Content-Type":"application/json"},body:JSON.stringify({pos:p})});}catch(e){}
+  load();}
 document.querySelectorAll(".pos").forEach(p=>p.addEventListener("click",()=>setpos(+p.dataset.p)));
-load(); setInterval(load,3000);
+load(); setInterval(load,1000);
 </script></body></html>"""

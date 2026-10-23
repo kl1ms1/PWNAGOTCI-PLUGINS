@@ -3,7 +3,16 @@
 main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
 main.plugins.vslider.enabled = true
 
-# No options yet. Open http://<ip>:8080/plugins/vslider/ and flip positions:
-#   1 Auto — normal hunting
-#   2 Dashboard — pauses hunting, carousel of mini-charts (rotates every 5s)
-#   3 ??? — reserved
+# Open http://<ip>:8080/plugins/vslider/ and flip positions:
+#   1 Auto      — normal hunting
+#   2 Dashboard — pauses hunting, tabbed dashboard (Охота/Система/Комикс/Пароли/№5),
+#                 tabs auto-rotate
+#   3 ???       — reserved
+
+# Connection line shown on the Охота tab (and the future Wi-Fi-join QR):
+# main.plugins.vslider.ap_ssid = "pwn-Ki213"
+# main.plugins.vslider.ap_pass = "changeme"
+# main.plugins.vslider.web = "http://10.0.0.2:8080"
+
+# Where pwndex stores its catalog (for the passwords tab):
+# main.plugins.vslider.pwndex = "/root/.pwndex/dex.json"
