@@ -15,10 +15,13 @@ Open: `http://<ip>:8080/plugins/pwndex/`
   marketplace — each shows how many networks that brand has.
 - **Passwords**: type them in manually OR pull them from `wpa-sec.cracked.potfile`
   (the "↻ Refresh from wpa-sec" button); peek at them later. Plus per-network notes.
+- **Export passwords**: the "⬇ Export passwords (.txt)" button downloads all saved
+  passwords as a text file (SSID / MAC / vendor / password).
 - **Download .pcap**: for caught networks, grab the captured handshake file right
   from the entry.
-- **Auto-whitelist**: networks you give a password to (your own) are auto-added to
-  `main.whitelist`, so pwnagotchi won't attack them.
+- **Auto-whitelist**: the moment you save a password for a network (your own), it's
+  auto-added to `main.whitelist` so pwnagotchi won't attack it — the UI confirms with
+  "saved ✓ · added to whitelist 🔒".
 - Stats on top: total / caught / brands / passwords.
 
 ## Install

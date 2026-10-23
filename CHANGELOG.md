@@ -25,6 +25,11 @@ Versions of the plugins in this repository.
 
 ## pwndex
 
+### 0.5.0
+- **Export passwords**: a button downloads all saved passwords as a `.txt` (SSID / MAC / vendor / password).
+- Saving a password now **confirms in the UI** that the network was added to the whitelist
+  ("saved ✓ · added to whitelist 🔒"); the auto-whitelist runs on every save.
+
 ### 0.4.0
 - **English UI**.
 - **Browse by brand**: clickable vendor chips (Xiaomi, TP-Link…), marketplace style,

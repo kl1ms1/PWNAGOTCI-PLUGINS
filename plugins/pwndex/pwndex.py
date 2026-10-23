@@ -26,7 +26,7 @@ import pwnagotchi.plugins as plugins
 
 class Pwndex(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.4.0"
+    __version__ = "0.5.0"
     __license__ = "MIT"
     __description__ = "Network pokedex: AP catalog (SSID/vendor/MAC), search, passwords. Web UI."
 
@@ -75,15 +75,19 @@ class Pwndex(plugins.Plugin):
 
     # --- your networks (with a password) -> whitelist, don't attack them --
     def _sync_whitelist(self):
+        """Add every password-having network (SSID + MAC) to main.whitelist.
+
+        Returns the number of newly added entries (0 if nothing/unavailable).
+        """
         if not self._auto_wl or self._agent is None:
-            return
+            return 0
         try:
             cfg = getattr(self._agent, "_config", None)
             if cfg is None:
-                return
+                return 0
             wl = cfg.setdefault("main", {}).setdefault("whitelist", [])
             if not isinstance(wl, list):
-                return
+                return 0
             added = 0
             with self._lock:
                 for e in self._dex.values():
@@ -95,8 +99,10 @@ class Pwndex(plugins.Plugin):
                             added += 1
             if added:
                 logging.info("[pwndex] whitelist += %d (your networks with a password)", added)
+            return added
         except Exception:
             logging.exception("[pwndex] whitelist sync")
+            return 0
 
     def on_unload(self, ui):
         self._save(force=True)
@@ -299,6 +305,22 @@ class Pwndex(plugins.Plugin):
                         return send_file(p, as_attachment=True,
                                          download_name=os.path.basename(p))
                     abort(404)
+                if action == "export":
+                    # download all saved passwords as a text file (TSV)
+                    from flask import Response
+                    with self._lock:
+                        rows = [e for e in self._dex.values() if e.get("pw")]
+                    rows.sort(key=lambda e: (e.get("ssid") or "").lower())
+                    lines = ["# pwndex passwords export",
+                             "# SSID\tMAC\tvendor\tpassword"]
+                    for e in rows:
+                        lines.append("\t".join([
+                            e.get("ssid") or "", e.get("mac") or "",
+                            e.get("vendor") or "", e.get("pw") or ""]))
+                    body = "\n".join(lines) + "\n"
+                    return Response(body, mimetype="text/plain; charset=utf-8",
+                                    headers={"Content-Disposition":
+                                             "attachment; filename=pwndex-passwords.txt"})
                 if path in (None, "", "/"):
                     return self._page()
                 abort(404)
@@ -323,9 +345,11 @@ class Pwndex(plugins.Plugin):
                     if "note" in body:
                         e["note"] = str(body["note"])[:200]
                     self._dirty = True
+                    has_pw = bool(e.get("pw"))
                 self._save(force=True)
                 self._sync_whitelist()   # password entered -> network to whitelist
-                return jsonify(ok=True)
+                # whitelisted = this network now has a password and auto-whitelist is on
+                return jsonify(ok=True, whitelisted=(has_pw and self._auto_wl))
 
             if action == "rescan":
                 self._import_potfile()
@@ -392,6 +416,7 @@ padding:7px 12px;font-size:.82rem;cursor:pointer;white-space:nowrap}
 .fld{margin:6px 0}.fld label{display:block;font-size:.78rem;color:var(--mut);margin-bottom:3px}
 .pwline{display:flex;gap:6px}.pwline input{flex:1}
 .save{background:var(--ok)}
+.pwstatus{font-size:.75rem;color:#7ee2a0;margin-top:4px;min-height:1em}
 .dl{display:inline-block;margin-top:8px;background:#172f1c;color:#7ee2a0;border:1px solid #2ea04366;
 border-radius:8px;padding:7px 12px;font-size:.85rem;text-decoration:none}
 .muted{color:var(--mut);font-size:.78rem;text-align:center;margin-top:14px}
@@ -407,7 +432,11 @@ border-radius:8px;padding:7px 12px;font-size:.85rem;text-decoration:none}
   <button class="chip" data-f="caught">🏆 Caught</button>
   <button class="chip" data-f="pw">🔑 With password</button>
   <button class="chip" data-f="seen">👁 Seen only</button>
-</div><button class="btn" id="rescan">↻ Refresh from wpa-sec</button></div>
+</div></div>
+<div class="bar">
+  <button class="btn" id="rescan">↻ Refresh from wpa-sec</button>
+  <a class="btn" id="export" href="/plugins/pwndex/?action=export">⬇ Export passwords (.txt)</a>
+</div>
 <div id="list"></div>
 <div class="muted">pwndex · passwords for your own networks only 🫡</div>
 </div>
@@ -467,7 +496,8 @@ function row(e){
    +'<div class="det">'
    +'<div class="fld"><label>Password</label><div class="pwline">'
    +'<input type="text" class="pw" value="'+esc(e.pw||"")+'" placeholder="none">'
-   +'<button class="btn save" onclick="save(this)">💾</button></div></div>'
+   +'<button class="btn save" onclick="save(this)">💾</button></div>'
+   +'<div class="pwstatus"></div></div>'
    +'<div class="fld"><label>Note</label><input type="text" class="note" value="'+esc(e.note||"")+'" placeholder="—"></div>'
    +(e.hp?'<a class="dl" href="'+BASE+'?action=pcap&mac='+encodeURIComponent(e.mac)+'">⬇ Download .pcap (handshake)</a>':'')
    +'</div></div>';
@@ -476,14 +506,21 @@ function toggle(h){h.parentElement.querySelector(".det").classList.toggle("open"
 async function save(btn){
   const row=btn.closest(".row"),mac=row.dataset.mac;
   const pw=row.querySelector(".pw").value, note=row.querySelector(".note").value;
+  const st=row.querySelector(".pwstatus");
   btn.textContent="…";
   try{const r=await fetch(BASE+"?action=set",{method:"POST",credentials:"same-origin",
     headers:{"X-CSRFToken":CSRF,"Content-Type":"application/json"},
     body:JSON.stringify({mac:mac,pw:pw,note:note})});
     const j=await r.json();btn.textContent=j.ok?"✓":"✗";
+    if(st)st.textContent=j.ok?(j.whitelisted?"saved ✓ · added to whitelist 🔒":"saved ✓"):"save failed";
     const e=ALL.find(x=>x.mac===mac);if(e){e.pw=pw;e.note=note;}
+    // reflect the 🔑 badge in the header without collapsing the open details
+    const ssidEl=row.querySelector(".ssid");
+    if(ssidEl){const b=ssidEl.querySelector(".b-pw");
+      if(pw&&!b)ssidEl.insertAdjacentHTML("beforeend",' <span class="badge b-pw">🔑</span>');
+      else if(!pw&&b)b.remove();}
     setTimeout(()=>btn.textContent="💾",1200);}
-  catch(e){btn.textContent="✗";setTimeout(()=>btn.textContent="💾",1200);}
+  catch(e){btn.textContent="✗";if(st)st.textContent="network error";setTimeout(()=>btn.textContent="💾",1200);}
 }
 $("#q").addEventListener("input",()=>{q=$("#q").value.toLowerCase().trim();render();});
 document.querySelectorAll("#filters .chip").forEach(c=>c.addEventListener("click",()=>{
