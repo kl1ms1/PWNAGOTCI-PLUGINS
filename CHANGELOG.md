@@ -51,6 +51,14 @@ Versions of the plugins in this repository.
 ### 0.1.0
 - Network pokedex + password store + wpa-sec import.
 
+## vslider
+
+### 0.1.0
+- First version of the **virtual slider** (web): 3 positions — **Auto** (hunt),
+  **Dashboard** (pauses hunting + a carousel of temp/CPU/memory/uptime mini-charts
+  that rotates every 5s, tap to flip), and a reserved **???** position. Position
+  persists across restarts.
+
 ## voice_ru
 
 ### 1.0.0

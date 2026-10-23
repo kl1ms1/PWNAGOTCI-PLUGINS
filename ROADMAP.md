@@ -24,10 +24,12 @@ Statuses: 💡 idea · 🏗️ in progress · ✅ done · 🔧 needs hardware
 - ✅ **brain** — AI agent (bandit): learns by channel and steers scanning, `(A_I)`
   face, lines, logs, web stats + settings. v1 done. See [plugins/brain](plugins/brain/).
   Next (layers): channel dwell time, deauth aggressiveness, targeting.
-- 🏗️ **slider** — the One-Touch Sync flagship: a 3-position **hardware switch**
-  (Hunt / Sync / Disguise). Sync = pause hunting → connect to your own network →
-  upload to wpa-sec → access the native web UI. The 3rd position is a hidden mode
-  with a combo lock. Order: **3rd** (waiting for hardware ~the 25th).
+- 🏗️ **vslider** — the **virtual** slider (web stand-in for the hardware switch):
+  v1 done — 3 positions (Auto / Dashboard carousel / reserved). See
+  [plugins/vslider](plugins/vslider/). Next: more carousel slides, e-ink carousel,
+  real Sync (upload to wpa-sec), position 3.
+- 🏗️ **slider (hardware)** — the One-Touch Sync flagship: a 3-position **hardware
+  switch** wired to GPIO, mirroring vslider's positions. Waiting for hardware (~the 25th).
 - ✅ **voice_ru** — all of pwnagotchi's phrases translated to Russian, applied in memory
   so updates don't wipe it. Done. See [plugins/voice_ru](plugins/voice_ru/).
 
