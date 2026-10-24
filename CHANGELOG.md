@@ -4,6 +4,13 @@ Versions of the plugins in this repository.
 
 ## callout (formerly deauth-announcer)
 
+### 0.6.0
+- **Announces the target NETWORK, not the client.** It used to say the client's
+  vendor ("Xiaomi"/"Apple"); now it names the Wi-Fi it's attacking
+  ("Атакую RT-GPON-3868."). The current network is learned from
+  `on_association`/`on_deauthentication` (which carry the AP). The client is kept
+  as a small secondary line in the web list.
+
 ### 0.5.0
 - **English web UI**. The **spoken phrases stay Russian** (that's what the device
   says), now proper sentences (capitalized, with a period) and more varied.

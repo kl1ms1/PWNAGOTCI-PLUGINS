@@ -51,7 +51,7 @@ Short version with troubleshooting — [`docs/INSTALLING.md`](docs/INSTALLING.md
 |--------|--------|--------|--------------|
 | [bootlogo](plugins/bootlogo/) | 0.4.7 | ✅ | Custom boot logo: photo in the browser → auto-fit for e-ink → show on screen and at power-on |
 | [pwndex](plugins/pwndex/) | 0.6.0 | ✅ | Network "pokedex": catalog, search, passwords (save + export), save .pcap per catch; your networks → whitelist |
-| [callout](plugins/callout/) | 0.5.0 | ✅ | pwnagotchi calls out the deauth victim by name instead of MAC (+ test button shows it on screen) |
+| [callout](plugins/callout/) | 0.6.0 | ✅ | pwnagotchi calls out the target **network** by name instead of MAC (+ test button shows it on screen) |
 | [brain](plugins/brain/) | 0.3.0 | ✅ | AI agent (bandit): learns and picks scanning channels; on a decision the face turns into `(A_I)` and speaks |
 | [voice_ru](plugins/voice_ru/) | 1.0.0 | ✅ | pwnagotchi speaks Russian — all phrases translated in memory (updates don't wipe it) |
 | [vslider](plugins/vslider/) | 0.2.0 | 🏗️ | Virtual 3-position slider (web): Auto / tabbed Dashboard (pauses hunting; Охота·Система·Комикс·Пароли·№5, auto-rotating) / reserved |

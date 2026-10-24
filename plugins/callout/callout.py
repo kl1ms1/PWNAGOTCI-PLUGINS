@@ -1,14 +1,19 @@
 """
-callout — pwnagotchi calls out the deauth victim by NAME instead of its MAC.
+callout — pwnagotchi calls out the TARGET NETWORK by name instead of the MAC.
 
-Instead of "Kickbanning A4:83:E7:11:22:33" it says "Kicking Ivan-PC off."
+Instead of "Kickbanning A4:83:E7:11:22:33" (or just the client's vendor like
+"Xiaomi"/"Apple") it says what it is actually working on — the Wi-Fi network:
+"Атакую RT-GPON-3868." The victim of a deauth is the client, but what the user
+cares about is the *network* being attacked, so that's what we announce.
+
 It patches voice.Voice.on_deauth IN MEMORY (the voice.py file is left untouched,
 so pwnagotchi updates don't wipe it). There is no extra line on screen — it
-changes the very phrase pwnagotchi already speaks.
+changes the very phrase pwnagotchi already speaks. The current target network is
+learned from the on_association / on_deauthentication hooks (which carry the AP).
 
 Web UI (http://<ip>:8080/plugins/callout/): a "Test phrase" button (shows what it
 would say right on the e-ink, without waiting for a real deauth) plus a list of
-recent targets by name. Log: /root/.callout/log.txt.
+recent targets. Log: /root/.callout/log.txt.
 """
 
 import logging
@@ -19,21 +24,24 @@ import time
 import pwnagotchi.plugins as plugins
 
 # What the device SAYS stays in Russian (only the web UI is English).
-# Proper sentences: capitalized, with a period, and varied. {name} = device name.
+# Proper sentences: capitalized, with a period, and varied. {net} = network name
+# (the selected Wi-Fi). {name} = the client device (available as a fallback).
 DEFAULT_PHRASES = [
-    "Глушу {name}.",
-    "Кикаю {name}.",
-    "Отключаю {name}.",
-    "Вырубаю {name}.",
-    "{name} — без WiFi!",
-    "Жму F по {name}.",
-    "Сношу {name} с эфира.",
-    "Пока, {name}.",
-    "Отрубаю {name}.",
-    "{name} отключён.",
+    "Атакую {net}.",
+    "Трясу {net}.",
+    "Ловлю хендшейк {net}.",
+    "Выбиваю {net}.",
+    "Работаю по {net}.",
+    "Глушу клиентов {net}.",
+    "{net} — моя цель.",
+    "Бью по {net}.",
+    "Дою {net}.",
+    "Качаю {net}.",
 ]
 
-# Demo clients for the Test button (mix of names and vendors).
+# Demo networks for the Test button.
+FAKE_NETS = ["RT-GPON-3868", "Keenetic-1122", "TP-LINK_A4F2", "MyHome_5G", "DomKirp"]
+# Demo clients (shown as the small secondary line).
 FAKE = [
     {"hostname": "Ivan-PC"}, {"hostname": "Galaxy-S21"}, {"vendor": "Apple"},
     {"vendor": "Xiaomi", "mac": "a4:50:46:9f:4f:2a"}, {"vendor": "TP-Link"},
@@ -41,12 +49,20 @@ FAKE = [
 ]
 
 
-def _nice_name(sta):
-    """Device name: hostname first; else vendor+MAC tail; else Device-XXXX.
+def _net_name(ap):
+    """Network name: essid/hostname first; else Net-XXXX from the BSSID."""
+    ap = ap or {}
+    for k in ("hostname", "essid", "ssid", "name"):
+        v = ap.get(k)
+        if v and v not in ("", "?", "<hidden>"):
+            return v
+    mac = (ap.get("mac") or ap.get("bssid") or "").replace(":", "").replace("-", "").upper()
+    tail = mac[-4:] if len(mac) >= 4 else ""
+    return "Net-" + tail if tail else "сеть"
 
-    The goal is to always show a device-looking NAME (even an ugly one) rather
-    than just the vendor/company.
-    """
+
+def _nice_name(sta):
+    """Client device name: hostname first; else vendor+MAC tail; else Device-XXXX."""
     sta = sta or {}
     for k in ("hostname", "name"):
         v = sta.get(k)
@@ -65,9 +81,9 @@ def _nice_name(sta):
 
 class Callout(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.5.0"
+    __version__ = "0.6.0"
     __license__ = "MIT"
-    __description__ = "pwnagotchi calls out the deauth victim by name, not MAC."
+    __description__ = "pwnagotchi calls out the target NETWORK by name, not the MAC."
 
     def __init__(self):
         self._dir = "/root/.callout"
@@ -75,11 +91,12 @@ class Callout(plugins.Plugin):
         self._phrases = DEFAULT_PHRASES
         self._recent = []
         self._patched = False
+        self._last_ap = ""          # name of the network currently being worked
         # showing the phrase on the e-ink itself
         self._ui = None
-        self._say_text = ""        # what the device is "saying" for the test
-        self._say_until = 0.0      # until when to hold it on screen
-        self._hold = 6             # seconds to hold the test phrase on screen
+        self._say_text = ""         # what the device is "saying" for the test
+        self._say_until = 0.0       # until when to hold it on screen
+        self._hold = 6              # seconds to hold the test phrase on screen
 
     def on_loaded(self):
         os.makedirs(self._dir, exist_ok=True)
@@ -103,7 +120,9 @@ class Callout(plugins.Plugin):
 
             def _patched(vself, sta):
                 try:
-                    return random.choice(plugin._phrases).format(name=_nice_name(sta))
+                    net = plugin._last_ap or _net_name(sta) or "сеть"
+                    return random.choice(plugin._phrases).format(
+                        net=net, name=_nice_name(sta))
                 except Exception:
                     return voice.Voice._callout_orig(vself, sta)
 
@@ -122,21 +141,28 @@ class Callout(plugins.Plugin):
             pass
 
     # --- log + history ----------------------------------------------------
-    def _record(self, who, net):
-        self._recent.insert(0, {"t": int(time.time()), "who": who, "net": net})
+    def _record(self, net, who):
+        self._recent.insert(0, {"t": int(time.time()), "net": net, "who": who})
         self._recent = self._recent[:100]
         try:
             with open(self._log, "a", encoding="utf-8") as f:
-                f.write("%s %s -> %s\n" %
-                        (time.strftime("%Y-%m-%d %H:%M:%S"), who, net))
+                f.write("%s %s <- %s\n" %
+                        (time.strftime("%Y-%m-%d %H:%M:%S"), net, who))
+        except Exception:
+            pass
+
+    # Learn which network we're on from association frames (fired before deauths).
+    def on_association(self, agent, access_point, client_station):
+        try:
+            self._last_ap = _net_name(access_point)
         except Exception:
             pass
 
     def on_deauthentication(self, agent, access_point, client_station):
         try:
-            who = _nice_name(client_station)
-            ap = access_point or {}
-            self._record(who, ap.get("hostname") or ap.get("essid") or "network")
+            net = _net_name(access_point)
+            self._last_ap = net
+            self._record(net, _nice_name(client_station))
         except Exception:
             logging.exception("[callout] on_deauth")
 
@@ -185,9 +211,10 @@ class Callout(plugins.Plugin):
         if act == "data":
             return jsonify(ok=True, items=self._recent, patched=self._patched)
         if act == "test":
+            net = random.choice(FAKE_NETS)
             sta = random.choice(FAKE)
-            sample = random.choice(self._phrases).format(name=_nice_name(sta))
-            self._record("TEST: " + _nice_name(sta), "demo")
+            sample = random.choice(self._phrases).format(net=net, name=_nice_name(sta))
+            self._record(net, "TEST: " + _nice_name(sta))
             self._say_on_screen(sample)   # show it right on the e-ink
             return jsonify(ok=True, sample=sample, shown=self._ui is not None)
         if path in (None, "", "/"):
@@ -216,7 +243,7 @@ border-radius:10px;padding:9px 12px;margin:7px 0;display:flex;justify-content:sp
 <div class="sub" id="sub"></div>
 <div class="bar"><button class="btn" id="test">🧪 Test phrase</button><span class="sample" id="sample"></span></div>
 <div id="list"><div class="empty">loading…</div></div>
-<div class="muted">pwnagotchi says the name instead of the MAC · your networks only 🫡</div>
+<div class="muted">pwnagotchi announces the target network · your networks only 🫡</div>
 </div>
 <script>
 const BASE="/plugins/callout/";
@@ -225,12 +252,12 @@ function age(t){const d=Date.now()/1000-t;if(d<60)return Math.round(d)+"s";
   if(d<3600)return Math.round(d/60)+"m";return Math.round(d/3600)+"h";}
 async function load(){
   try{const j=await (await fetch(BASE+"?action=data",{credentials:"same-origin"})).json();
-    document.getElementById("sub").textContent=j.patched?"deauth phrase replaced ✓":"⚠ patch not applied";
+    document.getElementById("sub").textContent=j.patched?"deauth phrase replaced ✓ (announces the network)":"⚠ patch not applied";
     const it=j.items||[];
     document.getElementById("list").innerHTML = it.length
-      ? it.map(e=>'<div class="row"><div><div class="who">'+esc(e.who)
-          +'</div><div class="net">▸ '+esc(e.net)+'</div></div><div class="age">'+age(e.t)+'</div></div>').join("")
-      : '<div class="empty">nobody jammed yet — hit “Test”</div>';
+      ? it.map(e=>'<div class="row"><div><div class="who">'+esc(e.net)
+          +'</div><div class="net">▸ client: '+esc(e.who)+'</div></div><div class="age">'+age(e.t)+'</div></div>').join("")
+      : '<div class="empty">nothing attacked yet — hit “Test”</div>';
   }catch(e){}
 }
 document.getElementById("test").addEventListener("click",async()=>{
