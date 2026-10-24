@@ -60,6 +60,13 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.3.0
+- **Switch animation.** Changing position now pops a little 3-section slider at the
+  **top-center**; the knob **glides** from the old position to the new one (with a
+  soft overshoot) and recolors to match (green/blue/purple). Plays on your own
+  clicks and when the position changes elsewhere. Web only — on the e-ink it'll just
+  snap (the screen is too slow for a smooth glide).
+
 ### 0.2.0
 - Position 2 reworked into a **tabbed dashboard** that **fully pauses hunting** and
   **auto-rotates tabs**: 🏆 Охота (stats + connection + QR placeholder) · 🖥 Система

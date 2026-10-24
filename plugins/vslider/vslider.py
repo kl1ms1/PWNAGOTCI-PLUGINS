@@ -35,7 +35,7 @@ HIST = 60
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.2.0"
+    __version__ = "0.3.0"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -501,7 +501,32 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 .subdots{display:flex;gap:6px;justify-content:center;margin-top:9px}
 .sd2{width:28px;height:4px;border-radius:3px;background:#30363d}.sd2.on{background:var(--gold)}
 .muted{color:var(--mut);font-size:.76rem;text-align:center;margin-top:12px}
+/* top-center switch animation overlay (plays on position change) */
+.sw{position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-10px);z-index:50;
+opacity:0;pointer-events:none;transition:opacity .25s ease,transform .25s ease;
+background:var(--card);border:1px solid var(--line);border-radius:14px;padding:9px 11px;
+box-shadow:0 10px 28px rgba(0,0,0,.55)}
+.sw.show{opacity:1;transform:translateX(-50%) translateY(0)}
+.swtrack{position:relative;width:282px;height:46px;background:#0b0f14;border:1px solid var(--line);border-radius:11px}
+.swsec{position:absolute;top:0;height:100%;width:94px;display:flex;flex-direction:column;align-items:center;justify-content:center}
+.swsec .sn{font-size:10px;font-weight:800;color:#6b7684;line-height:1}
+.swsec .sl{font-size:10px;color:#6b7684;margin-top:2px}
+.swsec.s1{left:0}.swsec.s2{left:94px}.swsec.s3{left:188px}
+.swdiv{position:absolute;top:9px;height:28px;width:1px;background:#22262d}
+.swd1{left:94px}.swd2{left:188px}
+.swknob{position:absolute;top:3px;left:3px;width:88px;height:40px;border-radius:9px;background:var(--acc);
+display:flex;flex-direction:column;align-items:center;justify-content:center;box-shadow:0 2px 7px rgba(0,0,0,.45);
+transition:left .5s cubic-bezier(.34,1.3,.5,1),background .3s ease}
+.swknob .kn{font-size:11px;font-weight:800;color:#fff;line-height:1}
+.swknob .kl{font-size:10px;color:#dbe7ff;margin-top:2px}
 </style></head><body><div class="wrap">
+<div class="sw" id="sw" aria-hidden="true"><div class="swtrack">
+  <div class="swdiv swd1"></div><div class="swdiv swd2"></div>
+  <div class="swsec s1"><div class="sn">1</div><div class="sl">Auto</div></div>
+  <div class="swsec s2"><div class="sn">2</div><div class="sl">Dash</div></div>
+  <div class="swsec s3"><div class="sn">3</div><div class="sl">Sync</div></div>
+  <div class="swknob" id="swknob"><div class="kn" id="swkn">1</div><div class="kl" id="swkl">Auto</div></div>
+</div></div>
 <h1>🎚️ vslider</h1><div class="sub">виртуальный слайдер · v1 (web)</div>
 <div class="slider" id="slider">
   <div class="pos" data-p="1">Auto<small>охота идёт</small></div>
@@ -617,12 +642,38 @@ function schedTab(){
   tabTimer=setTimeout(()=>{tabIdx=(tabIdx+1)%TABS.length;renderPanel();schedTab();},t.dur);
 }
 function paintSlider(){document.querySelectorAll(".pos").forEach(p=>p.classList.toggle("on",+p.dataset.p===POS));}
+
+/* --- top-center switch animation: knob slides from->to and back to rest --- */
+const SWLBL=[["1","Auto"],["2","Dashboard"],["3","Sync"]];
+const SWCOL=["var(--ok)","var(--acc)","var(--pur)"];
+let swTimer=null, firstLoad=true;
+function swSet(p,instant){
+  const k=document.getElementById("swknob");if(!k)return;
+  if(instant)k.style.transition="none";
+  k.style.left=((p-1)*94+3)+"px";
+  k.style.background=SWCOL[p-1];
+  document.getElementById("swkn").textContent=SWLBL[p-1][0];
+  document.getElementById("swkl").textContent=SWLBL[p-1][1];
+  if(instant){void k.offsetWidth;k.style.transition="";}   // reflow, then re-enable transition
+}
+function playSwitch(from,to){
+  if(from===to)return;
+  const w=document.getElementById("sw");if(!w)return;
+  swSet(from,true);                       // jump to the old position, no animation
+  w.classList.add("show");
+  requestAnimationFrame(()=>requestAnimationFrame(()=>swSet(to,false)));  // glide to the new one
+  clearTimeout(swTimer);
+  swTimer=setTimeout(()=>w.classList.remove("show"),1700);
+}
+
 async function load(){
   try{const j=await (await fetch(BASE+"?action=data",{credentials:"same-origin"})).json();
-    if(!j.ok)return;D=j;if(j.pos!==POS){POS=j.pos;tabIdx=0;pwSub=0;sysSub=0;schedTab();}paintSlider();renderPanel();}
+    if(!j.ok)return;D=j;
+    if(j.pos!==POS){if(!firstLoad)playSwitch(POS,j.pos);POS=j.pos;tabIdx=0;pwSub=0;sysSub=0;schedTab();}
+    firstLoad=false;paintSlider();renderPanel();}
   catch(e){}
 }
-async function setpos(p){POS=p;tabIdx=0;pwSub=0;sysSub=0;schedTab();paintSlider();renderPanel();
+async function setpos(p){if(p!==POS)playSwitch(POS,p);POS=p;tabIdx=0;pwSub=0;sysSub=0;schedTab();paintSlider();renderPanel();
   try{await fetch(BASE+"?action=setpos",{method:"POST",credentials:"same-origin",headers:{"X-CSRFToken":CSRF,"Content-Type":"application/json"},body:JSON.stringify({pos:p})});}catch(e){}
   load();}
 document.querySelectorAll(".pos").forEach(p=>p.addEventListener("click",()=>setpos(+p.dataset.p)));
