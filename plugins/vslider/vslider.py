@@ -48,6 +48,7 @@ class Vslider(plugins.Plugin):
         self._cpu_prev = None
         self._hist = {"temp": deque(maxlen=HIST), "cpu": deque(maxlen=HIST),
                       "mem": deque(maxlen=HIST)}
+        self._hist_t = deque(maxlen=HIST)   # timestamp per sample (for the time axis)
         self._nearby = []                 # current scan: [{ssid,mac,ch,rssi}]
         self._hs_total = 0                # all-time handshakes (persisted)
         self._hs_session = 0
@@ -287,6 +288,7 @@ class Vslider(plugins.Plugin):
         self._hist["temp"].append(self._read_temp())
         self._hist["cpu"].append(self._read_cpu())
         self._hist["mem"].append(self._read_mem())
+        self._hist_t.append(int(time.time()))
 
     # --- pwndex / wpa-sec --------------------------------------------------
     def _read_dex(self):
@@ -380,6 +382,7 @@ class Vslider(plugins.Plugin):
                 "throttled": self._read_throttled(), "ip": self._read_ip(),
                 "pcaps": self._pcap_count(), "nearby": len(self._nearby),
                 "bettercap": self._port_open(8081), "pwngrid": self._port_open(8666),
+                "span": round((time.time() - self._hist_t[0]) / 60.0, 1) if self._hist_t else 0,
                 "h": {k: list(v) for k, v in self._hist.items()}}
 
     def _comic(self, hunt):
@@ -479,6 +482,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 .q .ql{color:var(--mut);font-size:12px;display:flex;justify-content:space-between;align-items:baseline}
 .q .qv{font-weight:800;font-size:18px}.q .qv small{font-size:11px;color:var(--mut);font-weight:400}
 .qsub{font-size:11px;color:var(--mut);margin-top:8px}
+.xax{display:flex;justify-content:space-between;font-size:9px;color:var(--mut);margin-top:3px}
 .spk{width:100%;height:38px;display:block;margin-top:6px}
 .frames{display:flex;gap:8px}
 .frame{flex:1;background:#0b0f14;border:1px solid var(--line);border-radius:11px;padding:12px 6px;text-align:center}
@@ -558,12 +562,14 @@ function renderTab(){
   }
   if(t==="sys"){const s=D.sys,h=s.h||{};
     const tile=(lbl,val,extra)=>'<div class="q"><div class="ql">'+lbl+'<span class="qv">'+val+'</span></div>'+(extra||'')+'</div>';
-    let g;
+    let g,cap="";
     if(sysSub===0){
-      g=tile('🌡 Темп.',s.temp+'<small>°C</small>',spark(h.temp,"#f0883e",null,null))
-       +tile('⚙️ CPU',s.cpu+'<small>%</small>',spark(h.cpu,"#1f6feb",0,100))
-       +tile('🧠 Память',s.mem+'<small>%</small>',spark(h.mem,"#2ea043",0,100))
+      const ax='<div class="xax"><span>−'+(s.span||0)+'м</span><span>сейчас</span></div>';
+      g=tile('🌡 Темп.',s.temp+'<small>°C</small>',spark(h.temp,"#f0883e",null,null)+ax)
+       +tile('⚙️ CPU',s.cpu+'<small>%</small>',spark(h.cpu,"#1f6feb",0,100)+ax)
+       +tile('🧠 Память',s.mem+'<small>%</small>',spark(h.mem,"#2ea043",0,100)+ax)
        +tile('💾 SD',s.sd_used+'<small>%</small>','<div class="qsub">своб. '+s.sd_free+' ГБ</div>');
+      cap='<div class="muted" style="margin-top:6px">графики за последние ~'+(s.span||0)+' мин · ось: раньше → сейчас</div>';
     }else if(sysSub===1){
       const tc=(s.throttled==="OK")?'#3fb950':(s.throttled==="н/д"?'#8b949e':'#f0883e');
       g=tile('📊 Нагрузка',s.load,'')
@@ -578,7 +584,7 @@ function renderTab(){
        +tile('📥 .pcap',s.pcaps,'');
     }
     const dots=[0,1,2].map(i=>'<span class="sd2'+(i===sysSub?' on':'')+'"></span>').join('');
-    return '<div class="grid">'+g+'</div><div class="subdots">'+dots+'</div>';
+    return '<div class="grid">'+g+'</div>'+cap+'<div class="subdots">'+dots+'</div>';
   }
   if(t==="comic"){const fr=D.comic||[];
     return '<div class="frames">'+fr.map(f=>'<div class="frame"><div class="face">'+esc(f.f)+'</div><div class="cap">'+esc(f.c)+'</div></div>').join('')+'</div>'
