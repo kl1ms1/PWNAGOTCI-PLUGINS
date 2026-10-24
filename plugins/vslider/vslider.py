@@ -223,6 +223,66 @@ class Vslider(plugins.Plugin):
         except Exception:
             return 0.0, 0.0
 
+    def _read_load(self):
+        try:
+            with open("/proc/loadavg") as f:
+                return round(float(f.read().split()[0]), 2)
+        except Exception:
+            return 0.0
+
+    def _read_freq(self):
+        try:
+            with open("/sys/devices/system/cpu/cpu0/cpufreq/scaling_cur_freq") as f:
+                return int(int(f.read().strip()) / 1000)   # MHz
+        except Exception:
+            return 0
+
+    def _read_throttled(self):
+        try:
+            import subprocess
+            out = subprocess.run(["vcgencmd", "get_throttled"], capture_output=True,
+                                  text=True, timeout=3).stdout
+            val = int(out.strip().split("=")[1], 16)
+            if val == 0:
+                return "OK"
+            flags = []
+            if val & 0x1:
+                flags.append("undervolt")
+            if val & 0x4:
+                flags.append("throttle")
+            if val & 0x50000:
+                flags.append("было")
+            return ",".join(flags) or "⚠"
+        except Exception:
+            return "н/д"
+
+    @staticmethod
+    def _port_open(port):
+        import socket
+        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        s.settimeout(0.3)
+        try:
+            return s.connect_ex(("127.0.0.1", port)) == 0
+        except Exception:
+            return False
+        finally:
+            s.close()
+
+    def _read_ip(self):
+        try:
+            import subprocess
+            out = subprocess.run(["hostname", "-I"], capture_output=True,
+                                 text=True, timeout=3).stdout.split()
+            return out[0] if out else "—"
+        except Exception:
+            return "—"
+
+    def _pcap_count(self):
+        try:
+            return sum(1 for f in os.listdir(self._hs_dir) if f.endswith(".pcap"))
+        except Exception:
+            return 0
+
     def _sample_sys(self):
         self._hist["temp"].append(self._read_temp())
         self._hist["cpu"].append(self._read_cpu())
@@ -316,6 +376,10 @@ class Vslider(plugins.Plugin):
         used, free = self._read_sd()
         return {"temp": self._read_temp(), "cpu": self._read_cpu(), "mem": self._read_mem(),
                 "sd_used": used, "sd_free": free, "uptime": self._read_uptime(),
+                "load": self._read_load(), "freq": self._read_freq(),
+                "throttled": self._read_throttled(), "ip": self._read_ip(),
+                "pcaps": self._pcap_count(), "nearby": len(self._nearby),
+                "bettercap": self._port_open(8081), "pwngrid": self._port_open(8666),
                 "h": {k: list(v) for k, v in self._hist.items()}}
 
     def _comic(self, hunt):
@@ -414,6 +478,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 .q{background:#0b0f14;border:1px solid var(--line);border-radius:11px;padding:11px}
 .q .ql{color:var(--mut);font-size:12px;display:flex;justify-content:space-between;align-items:baseline}
 .q .qv{font-weight:800;font-size:18px}.q .qv small{font-size:11px;color:var(--mut);font-weight:400}
+.qsub{font-size:11px;color:var(--mut);margin-top:8px}
 .spk{width:100%;height:38px;display:block;margin-top:6px}
 .frames{display:flex;gap:8px}
 .frame{flex:1;background:#0b0f14;border:1px solid var(--line);border-radius:11px;padding:12px 6px;text-align:center}
@@ -445,7 +510,7 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 <script>
 const BASE="/plugins/vslider/", CSRF="__CSRF__";
 const $=s=>document.querySelector(s);
-let POS=1, D=null, tabIdx=0, pwSub=0, tabTimer=null, subTimer=null;
+let POS=1, D=null, tabIdx=0, pwSub=0, sysSub=0, tabTimer=null, subTimer=null;
 const TABS=[
   {id:"hunt",lbl:"🏆 Охота",dur:5000},
   {id:"sys", lbl:"🖥 Система",dur:15000},
@@ -492,12 +557,28 @@ function renderTab(){
       +'<div class="conn">📡 Wi-Fi: '+esc(c.ssid)+' · pass: '+esc(c.pass)+' · веб: '+esc((c.web||"").replace("http://",""))+'</div>';
   }
   if(t==="sys"){const s=D.sys,h=s.h||{};
-    return '<div class="grid">'
-      +'<div class="q"><div class="ql">🌡 Температура<span class="qv">'+s.temp+'<small>°C</small></span></div>'+spark(h.temp,"#f0883e",null,null)+'</div>'
-      +'<div class="q"><div class="ql">⚙️ CPU<span class="qv">'+s.cpu+'<small>%</small></span></div>'+spark(h.cpu,"#1f6feb",0,100)+'</div>'
-      +'<div class="q"><div class="ql">🧠 Память<span class="qv">'+s.mem+'<small>%</small></span></div>'+spark(h.mem,"#2ea043",0,100)+'</div>'
-      +'<div class="q"><div class="ql">💾 Карта SD<span class="qv">'+s.sd_used+'<small>%</small></span></div>'
-      +'<div style="font-size:11px;color:var(--mut);margin-top:8px">свободно '+s.sd_free+' ГБ<br>аптайм '+upt(s.uptime)+'</div></div></div>';
+    const tile=(lbl,val,extra)=>'<div class="q"><div class="ql">'+lbl+'<span class="qv">'+val+'</span></div>'+(extra||'')+'</div>';
+    let g;
+    if(sysSub===0){
+      g=tile('🌡 Темп.',s.temp+'<small>°C</small>',spark(h.temp,"#f0883e",null,null))
+       +tile('⚙️ CPU',s.cpu+'<small>%</small>',spark(h.cpu,"#1f6feb",0,100))
+       +tile('🧠 Память',s.mem+'<small>%</small>',spark(h.mem,"#2ea043",0,100))
+       +tile('💾 SD',s.sd_used+'<small>%</small>','<div class="qsub">своб. '+s.sd_free+' ГБ</div>');
+    }else if(sysSub===1){
+      const tc=(s.throttled==="OK")?'#3fb950':(s.throttled==="н/д"?'#8b949e':'#f0883e');
+      g=tile('📊 Нагрузка',s.load,'')
+       +tile('⚡ Частота',s.freq+'<small>МГц</small>','<div class="qsub">троттл: <b style="color:'+tc+'">'+esc(s.throttled)+'</b></div>')
+       +tile('⏱ Аптайм',upt(s.uptime),'')
+       +tile('📶 Сетей рядом',s.nearby,'');
+    }else{
+      const dot=ok=>'<span style="color:'+(ok?'#3fb950':'#f85149')+'">●</span> '+(ok?'жив':'нет');
+      g=tile('🛰 bettercap',dot(s.bettercap),'')
+       +tile('🛰 pwngrid',dot(s.pwngrid),'')
+       +tile('🌐 IP','<span style="font-size:13px">'+esc(s.ip)+'</span>','')
+       +tile('📥 .pcap',s.pcaps,'');
+    }
+    const dots=[0,1,2].map(i=>'<span class="sd2'+(i===sysSub?' on':'')+'"></span>').join('');
+    return '<div class="grid">'+g+'</div><div class="subdots">'+dots+'</div>';
   }
   if(t==="comic"){const fr=D.comic||[];
     return '<div class="frames">'+fr.map(f=>'<div class="frame"><div class="face">'+esc(f.f)+'</div><div class="cap">'+esc(f.c)+'</div></div>').join('')+'</div>'
@@ -526,15 +607,16 @@ function schedTab(){
   if(POS!==2)return;
   const t=TABS[tabIdx];
   if(t.id==="pw"){pwSub=0;subTimer=setInterval(()=>{pwSub=(pwSub+1)%2;renderPanel();},5000);}
+  if(t.id==="sys"){sysSub=0;subTimer=setInterval(()=>{sysSub=(sysSub+1)%3;renderPanel();},5000);}
   tabTimer=setTimeout(()=>{tabIdx=(tabIdx+1)%TABS.length;renderPanel();schedTab();},t.dur);
 }
 function paintSlider(){document.querySelectorAll(".pos").forEach(p=>p.classList.toggle("on",+p.dataset.p===POS));}
 async function load(){
   try{const j=await (await fetch(BASE+"?action=data",{credentials:"same-origin"})).json();
-    if(!j.ok)return;D=j;if(j.pos!==POS){POS=j.pos;tabIdx=0;pwSub=0;schedTab();}paintSlider();renderPanel();}
+    if(!j.ok)return;D=j;if(j.pos!==POS){POS=j.pos;tabIdx=0;pwSub=0;sysSub=0;schedTab();}paintSlider();renderPanel();}
   catch(e){}
 }
-async function setpos(p){POS=p;tabIdx=0;pwSub=0;schedTab();paintSlider();renderPanel();
+async function setpos(p){POS=p;tabIdx=0;pwSub=0;sysSub=0;schedTab();paintSlider();renderPanel();
   try{await fetch(BASE+"?action=setpos",{method:"POST",credentials:"same-origin",headers:{"X-CSRFToken":CSRF,"Content-Type":"application/json"},body:JSON.stringify({pos:p})});}catch(e){}
   load();}
 document.querySelectorAll(".pos").forEach(p=>p.addEventListener("click",()=>setpos(+p.dataset.p)));
