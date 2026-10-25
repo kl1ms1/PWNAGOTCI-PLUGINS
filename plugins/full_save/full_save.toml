@@ -1,0 +1,20 @@
+# full_save config. Copy into /etc/pwnagotchi/config.toml (правь ТОЛЬКО через SSH).
+
+main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
+main.plugins.full_save.enabled = true
+
+# Папка с хендшейками (должна совпадать с bettercap.handshakes):
+# main.plugins.full_save.handshakes = "/home/pi/handshakes"
+
+# Добавлять полностью пойманные сети в whitelist (перестать их долбить):
+# main.plugins.full_save.whitelist_done = true
+
+# Что делать с дублями пойманной сети:
+#   false (по умолчанию) — ПЕРЕНОСить в корзину (можно вернуть)
+#   true                 — удалять по-настоящему
+# main.plugins.full_save.hard_delete = false
+
+# Папка-корзина (по умолчанию внутри папки хендшейков):
+# main.plugins.full_save.trash_dir = "/home/pi/handshakes/_full_save_trash"
+
+# Веб-статус: http://<ip>:8080/plugins/full_save/

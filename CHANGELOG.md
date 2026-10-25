@@ -62,6 +62,16 @@ Versions of the plugins in this repository.
 ### 0.1.0
 - Network pokedex + password store + wpa-sec import.
 
+## full_save
+
+### 0.1.0
+- First version. Detects a **crackable** handshake per network (EAPOL M1/M3 +
+  M2/M4, or PMKID) with a built-in parser; whitelists fully-captured networks so
+  pwnagotchi stops re-attacking them, and tidies duplicate `.pcap` files. Safe by
+  design: only touches regular `.pcap` files directly inside the handshakes dir,
+  rejects symlinks and anything outside, and **moves to a trash folder** instead
+  of deleting (unless `hard_delete = true`). Ships a safety test suite.
+
 ## vslider
 
 ### 0.3.1
