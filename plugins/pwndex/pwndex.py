@@ -26,7 +26,7 @@ import pwnagotchi.plugins as plugins
 
 class Pwndex(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.0"
+    __version__ = "0.6.1"
     __license__ = "MIT"
     __description__ = "Network pokedex: AP catalog (SSID/vendor/MAC), search, passwords. Web UI."
 
@@ -259,6 +259,7 @@ class Pwndex(plugins.Plugin):
                 if e is not None and not e.get("pw"):
                     e["pw"] = pw
                     e["caught"] = True
+                    e["pw_at"] = int(time.time())   # when we first saw the password
                     self._dirty = True
 
     # --- stats -------------------------------------------------------------
@@ -342,6 +343,8 @@ class Pwndex(plugins.Plugin):
                         return jsonify(ok=False, msg="No such entry"), 404
                     if "pw" in body:
                         e["pw"] = str(body["pw"])[:128]
+                        if e["pw"]:
+                            e["pw_at"] = int(time.time())   # when the password was saved
                     if "note" in body:
                         e["note"] = str(body["note"])[:200]
                     self._dirty = True

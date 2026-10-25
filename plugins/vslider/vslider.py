@@ -35,7 +35,7 @@ HIST = 60
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.3.0"
+    __version__ = "0.3.1"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -50,6 +50,7 @@ class Vslider(plugins.Plugin):
                       "mem": deque(maxlen=HIST)}
         self._hist_t = deque(maxlen=HIST)   # timestamp per sample (for the time axis)
         self._nearby = []                 # current scan: [{ssid,mac,ch,rssi}]
+        self._unfiltered_at = 0           # last time we got the UNFILTERED ap list
         self._hs_total = 0                # all-time handshakes (persisted)
         self._hs_session = 0
         self._hs_times = deque(maxlen=500)  # timestamps for rate
@@ -99,15 +100,33 @@ class Vslider(plugins.Plugin):
         self._bump_streak(now)
         self._save_stats()
 
+    @staticmethod
+    def _norm_aps(access_points):
+        near = []
+        for ap in access_points or []:
+            mac = (ap.get("mac") or ap.get("bssid") or "").upper()
+            near.append({"ssid": ap.get("hostname") or ap.get("essid") or ap.get("ssid") or "",
+                         "mac": mac, "ch": ap.get("channel") or 0,
+                         "rssi": ap.get("rssi") or -99})
+        return near
+
     def on_wifi_update(self, agent, access_points):
+        # Filtered list (whitelisted/own networks are removed by pwnagotchi).
+        # Use it only if the unfiltered hook isn't firing, otherwise our own
+        # saved networks would disappear from "Nearby".
+        if time.time() - self._unfiltered_at < 120:
+            return
         try:
-            near = []
-            for ap in access_points or []:
-                mac = (ap.get("mac") or ap.get("bssid") or "").upper()
-                near.append({"ssid": ap.get("hostname") or ap.get("essid") or ap.get("ssid") or "",
-                             "mac": mac, "ch": ap.get("channel") or 0,
-                             "rssi": ap.get("rssi") or -99})
-            self._nearby = near
+            self._nearby = self._norm_aps(access_points)
+        except Exception:
+            pass
+
+    def on_unfiltered_ap_list(self, agent, access_points):
+        # Full list INCLUDING whitelisted — so your own saved networks still
+        # show up in "Nearby" when they're around.
+        try:
+            self._nearby = self._norm_aps(access_points)
+            self._unfiltered_at = time.time()
         except Exception:
             pass
 
@@ -329,11 +348,14 @@ class Vslider(plugins.Plugin):
 
     def _cracked(self, dex, pot_ssids, pot_macs):
         items = [e for e in dex.values() if e.get("pw")]
-        items.sort(key=lambda e: e.get("last", 0), reverse=True)   # newest first
+        # newest *saved* first: by when the password was added (pw_at),
+        # falling back to last-seen for older entries without that stamp.
+        items.sort(key=lambda e: (e.get("pw_at") or e.get("last") or 0), reverse=True)
         out = []
         for e in items[:50]:
             out.append({"ssid": e.get("ssid") or "(hidden)", "pw": e.get("pw"),
-                        "src": self._src_of(e, pot_ssids, pot_macs)})
+                        "src": self._src_of(e, pot_ssids, pot_macs),
+                        "at": e.get("pw_at") or 0})
         return out
 
     def _nearby_list(self, dex, pot_ssids, pot_macs):
@@ -348,7 +370,7 @@ class Vslider(plugins.Plugin):
             e = by_mac.get(mac)
             name = ap["ssid"] or (e.get("ssid") if e else "") or "(hidden)"
             if e and e.get("pw"):
-                withpw.append({"ssid": name, "pw": e["pw"],
+                withpw.append({"ssid": name, "pw": e["pw"], "mine": True,
                                "src": self._src_of(e, pot_ssids, pot_macs), "rssi": ap["rssi"]})
             else:
                 nopw.append({"ssid": name, "pw": "", "src": "non", "rssi": ap["rssi"]})
@@ -496,6 +518,8 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 .e .ssid{font-weight:600;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:78px}
 .e .dash{color:var(--mut);margin:0 4px}.e .p{font-family:ui-monospace,monospace;color:#7ee2a0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .e .no{color:var(--mut);font-style:italic}
+.e .ago{color:var(--mut);font-size:9px;margin-left:auto;padding-left:5px;white-space:nowrap}
+.e .home{margin-left:4px;font-size:10px}
 .legend{display:flex;gap:12px;justify-content:center;font-size:10px;color:var(--mut);margin-top:9px}
 .legend i{display:inline-block;width:9px;height:9px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 .subdots{display:flex;gap:6px;justify-content:center;margin-top:9px}
@@ -556,13 +580,23 @@ function spark(a,col,lo,hi){a=a||[];const W=200,H=38,n=a.length;
 function upt(s){s=s||0;const d=(s/86400)|0,h=(s%86400/3600)|0,m=(s%3600/60)|0;return d?d+"д "+h+"ч":h?h+"ч "+m+"м":m+"м";}
 
 function tabsBar(act){return '<div class="tabs">'+TABS.map(t=>'<div class="tb'+(t.id===act?' on':'')+'">'+t.lbl+'</div>').join('')+'</div>';}
-function pwRows(list,withNo){
+function ago(t){if(!t)return "";const d=Date.now()/1000-t;
+  if(d<60)return "сейчас";if(d<3600)return Math.round(d/60)+"м";
+  if(d<86400)return Math.round(d/3600)+"ч";return Math.round(d/86400)+"д";}
+function pwRows(list,mode){
   const n=list.length, half=Math.ceil(n/2);
   function cell(e,i){
-    const inner = (e.pw||!withNo)?'<span class="dash">-</span><span class="p">'+esc(e.pw)+'</span>'
-      :'<span class="dash">-</span><span class="no">нет пароля</span>';
+    let tail;
+    if(mode==="cracked"){
+      tail='<span class="dash">-</span><span class="p">'+esc(e.pw)+'</span>'
+          +'<span class="ago">'+ago(e.at)+'</span>';
+    }else{
+      const home=e.mine?'<span class="home">🏠</span>':'';
+      tail=e.pw?'<span class="dash">-</span><span class="p">'+esc(e.pw)+'</span>'+home
+              :'<span class="dash">-</span><span class="no">нет пароля</span>';
+    }
     return '<div class="e"><span class="n">'+(i+1)+'.</span><span class="src '+e.src+'"></span>'
-      +'<span class="ssid">'+esc(e.ssid)+'</span>'+inner+'</div>';
+      +'<span class="ssid">'+esc(e.ssid)+'</span>'+tail+'</div>';
   }
   let L="",R="";
   list.forEach((e,i)=>{(i<half?L+=cell(e,i):R+=cell(e,i));});
@@ -617,11 +651,11 @@ function renderTab(){
   }
   if(t==="pw"){
     if(pwSub===0){
-      return '<div class="ttl">Cracked networks</div>'+pwRows(D.cracked||[],false)
+      return '<div class="ttl">Cracked networks <span style="font-size:10px;color:var(--mut);font-weight:400">· новые сверху</span></div>'+pwRows(D.cracked||[],"cracked")
         +'<div class="legend"><span><i class="wpa"></i>wpa-sec</span><span><i class="pdx"></i>pwndex</span></div>'
         +'<div class="subdots"><span class="sd2 on"></span><span class="sd2"></span></div>';
     }
-    return '<div class="ttl">Nearby</div>'+pwRows(D.nearby||[],true)
+    return '<div class="ttl">Nearby</div>'+pwRows(D.nearby||[],"nearby")
       +'<div class="legend"><span><i class="wpa"></i>wpa-sec</span><span><i class="pdx"></i>pwndex</span><span><i class="non"></i>нет пароля</span></div>'
       +'<div class="subdots"><span class="sd2"></span><span class="sd2 on"></span></div>';
   }

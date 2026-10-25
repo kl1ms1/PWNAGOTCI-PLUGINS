@@ -32,6 +32,10 @@ Versions of the plugins in this repository.
 
 ## pwndex
 
+### 0.6.1
+- Records **when a password was saved** (`pw_at`) — used by vslider to sort the
+  Cracked list newest-first and show the age.
+
 ### 0.6.0
 - A **"💾 .pcap" button right on each caught network** (next to the badge) — saves the
   handshake file without expanding the entry.
@@ -59,6 +63,12 @@ Versions of the plugins in this repository.
 - Network pokedex + password store + wpa-sec import.
 
 ## vslider
+
+### 0.3.1
+- **Passwords tab fixes:** the **Cracked** list is now sorted **newest-saved first**
+  (by when the password was added) and shows a small **age** (сейчас/1ч/1д) per row.
+- **Nearby** now also shows your **own/whitelisted networks** (uses the *unfiltered*
+  AP list, which pwnagotchi otherwise hides from plugins) — marked with 🏠.
 
 ### 0.3.0
 - **Switch animation.** Changing position now pops a little 3-section slider at the
