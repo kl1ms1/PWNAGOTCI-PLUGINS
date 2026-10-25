@@ -32,7 +32,7 @@ fi
 
 echo "==> 2/6  Наши плагины в custom-plugins"
 mkdir -p "$PLUG"
-for f in bootlogo brain callout pwndex vslider voice_ru; do
+for f in bootlogo brain callout pwndex vslider voice_ru full_save; do
   if [ -f "/home/pi/$f.py" ]; then
     cp "/home/pi/$f.py" "$PLUG/" && echo "    + $f.py (обновлён из /home/pi)"
   elif [ -f "$PLUG/$f.py" ]; then
@@ -73,6 +73,10 @@ main.plugins.vslider.enabled = true
 main.plugins.voice_ru.enabled = true
 main.plugins.bootlogo.enabled = true
 main.plugins.bootlogo.path = "/root/pwnagotchi-bootlogo.png"
+main.plugins.full_save.enabled = true
+main.plugins.full_save.handshakes = "/home/pi/handshakes"
+main.plugins.full_save.whitelist_done = true
+main.plugins.full_save.hard_delete = false
 
 # ---------- КОММЬЮНИТИ-ПЛАГИНЫ (как у тебя было) ----------
 main.plugins.auto-tune.enabled = true
