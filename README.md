@@ -55,7 +55,7 @@ Short version with troubleshooting — [`docs/INSTALLING.md`](docs/INSTALLING.md
 | [brain](plugins/brain/) | 0.3.0 | ✅ | AI agent (bandit): learns and picks scanning channels; on a decision the face turns into `(A_I)` and speaks |
 | [voice_ru](plugins/voice_ru/) | 1.0.0 | ✅ | pwnagotchi speaks Russian — all phrases translated in memory (updates don't wipe it) |
 | [full_save](plugins/full_save/) | 0.1.0 | ✅ | One good handshake per network: whitelist fully-captured nets, tidy duplicate .pcaps (safe — moves to trash, never leaves the handshakes dir) |
-| [vslider](plugins/vslider/) | 0.5.1 | 🏗️ | Virtual 3-position slider (web + **e-ink**) with a switch animation: Auto / tabbed Dashboard (pauses hunting; Охота·Система·Комикс·Пароли·№5, auto-rotating) / reserved |
+| [vslider](plugins/vslider/) | 0.5.2 | 🏗️ | Virtual 3-position slider (web + **e-ink**) with a switch animation: Auto / tabbed Dashboard (pauses hunting; Охота·Система·Комикс·Пароли·№5, auto-rotating) / reserved |
 
 Version history — in [`CHANGELOG.md`](CHANGELOG.md). Tags/releases — on the repo's **Releases** tab.
 

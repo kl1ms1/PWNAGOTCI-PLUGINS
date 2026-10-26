@@ -78,6 +78,10 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.5.2
+- The e-ink dashboard now always **starts on the Hunt tab** when you switch to
+  Dashboard (pos 2), instead of resuming mid-rotation.
+
 ### 0.5.1
 - E-ink tabs now have **sub-pages** that rotate every 5 s, matching the web:
   **System** = 3 pages (graphs → load/freq/uptime/near → bettercap/pwngrid/.pcap/IP,

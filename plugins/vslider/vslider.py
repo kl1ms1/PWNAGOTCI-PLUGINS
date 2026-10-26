@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.5.1"
+    __version__ = "0.5.2"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -865,6 +865,11 @@ class Vslider(plugins.Plugin):
             old = self._pos
             self._pos = pos
             self._queue_anim(old, pos)      # slide the knob on the e-ink too
+            if pos == POS_DASH:
+                # always start the dashboard on the first tab (Hunt)
+                self._tab_idx = 0
+                self._sub_idx = 0
+                self._tab_since = time.time()
             self._apply()
             self._save_state()
             return jsonify(ok=True, pos=self._pos)
