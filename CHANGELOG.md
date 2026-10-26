@@ -74,6 +74,15 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.5.0
+- **Full web-style dashboard on the e-ink** (Dashboard / pos 2): a real
+  full-screen takeover drawn by a custom widget — rounded tab bar at the top
+  (Hunt · Sys · Comic · Keys · #5, auto-rotating), rounded cards, live
+  **sparkline graphs** (temp/CPU/RAM), a Wi-Fi-join **QR** placeholder, and lots
+  of stats. **English**, temperature to one decimal. Each tab draws its own data.
+- Covers the normal pwnagotchi UI cleanly (no overlap) while in Dashboard, and
+  restores the normal screen in Auto.
+
 ### 0.4.1
 - **Full dashboard ON the e-ink** in Dashboard mode — the device screen now shows
   the live data (bettercap/pwngrid status, IP, .pcap count, nearby, handshakes,

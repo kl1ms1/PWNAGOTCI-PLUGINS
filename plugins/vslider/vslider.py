@@ -32,10 +32,34 @@ import pwnagotchi.plugins as plugins
 POS_AUTO, POS_DASH, POS_X = 1, 2, 3
 HIST = 60
 
+# base widget for the full-screen e-ink dashboard
+try:
+    from pwnagotchi.ui.components import Widget as _Widget
+except Exception:
+    _Widget = object
+
+
+class _DashWidget(_Widget):
+    """A full-screen widget: delegates drawing to the plugin (Dashboard mode)."""
+
+    def __init__(self, plugin):
+        try:
+            super().__init__((0, 0))
+        except Exception:
+            pass
+        self.xy = (0, 0)
+        self._p = plugin
+
+    def draw(self, canvas, drawer):
+        try:
+            self._p._draw_eink(canvas, drawer)
+        except Exception:
+            pass
+
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.4.1"
+    __version__ = "0.5.0"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -63,13 +87,12 @@ class Vslider(plugins.Plugin):
         self._conn = {"ssid": "pwn-ap", "pass": "changeme", "web": ""}
         # --- e-ink screen output ---
         self._ui = None
-        self._eink = True                 # show the mode slider on the e-ink
-        self._eink_pos = (92, 0)          # top-center-ish; configurable
+        self._eink = True                 # full-screen dashboard on the e-ink
         self._eink_added = False
-        self._eink_body = False           # the full-screen dashboard text lines
-        self._face_blanked = False
         self._eink_cache = None           # throttled dashboard values
         self._eink_cache_at = 0
+        self._tab_idx = 0                 # which dashboard tab is showing
+        self._tab_since = 0.0
         self._anim_frames = []            # pending switch-animation frames
         self._recon_state = None          # "on"/"off" — avoid spamming bettercap
 
@@ -193,109 +216,266 @@ class Vslider(plugins.Plugin):
                   for s in range(old, new + step, step)]
         self._anim_frames = frames
 
+    # --- e-ink: full-screen dashboard (Dashboard / pos 2) ------------------
+    TAB_DUR = (5, 15, 5, 10, 5)        # seconds per tab (Hunt..#5)
+
     def on_ui_setup(self, ui):
         self._ui = ui
         if not self._eink:
             return
         try:
-            from pwnagotchi.ui.components import Text
-            from pwnagotchi.ui.view import BLACK
-            import pwnagotchi.ui.fonts as fonts
+            ui.add_element("vdash", _DashWidget(self))
             self._eink_added = True
-            # full-screen dashboard body lines (shown in Dashboard mode).
-            # The switch animation plays in the status line, so there is no
-            # separate top tag that could collide with the clock/uptime.
-            for i in range(5):
-                ui.add_element("vd_l%d" % (i + 1), Text(
-                    value="", position=(5, 14 + i * 13),
-                    font=fonts.Small, color=BLACK))
-            self._eink_body = True
+            self._tab_since = time.time()
         except Exception:
-            logging.debug("[vslider] could not add e-ink element")
+            logging.debug("[vslider] could not add e-ink dashboard")
 
     def on_ui_update(self, ui):
         self._ui = ui
         if not (self._eink and self._eink_added):
             return
         try:
-            # switch animation: the knob slides across the status line
-            anim = False
+            # switch animation: knob slides across the status line
             if self._anim_frames:
                 ui.set("status", self._anim_frames.pop(0))
-                anim = True
-            # Dashboard (pos 2): fill the screen with the live data (like the web).
             if self._pos == POS_DASH:
-                self._render_dash(ui, skip_status=anim)
-            else:
-                self._clear_dash(ui)
+                # ensure our dashboard draws LAST (on top of everything else)
+                try:
+                    st = getattr(getattr(ui, "_state", None), "_state", None)
+                    if isinstance(st, dict) and "vdash" in st:
+                        st["vdash"] = st.pop("vdash")
+                except Exception:
+                    pass
+                self._advance_tab()
         except Exception:
             pass
-
-    def _render_dash(self, ui, skip_status=False):
-        lines = self._eink_data()
-        if self._eink_body:
-            for i in range(5):
-                ui.set("vd_l%d" % (i + 1), lines[i] if i < len(lines) else "")
-        # short title in the speech line; data lives in the body
-        if not skip_status:
-            ui.set("status", "Дашборд · "
-                   "охота на паузе")
-        try:
-            ui.set("face", "")        # free the center for the data
-            self._face_blanked = True
-        except Exception:
-            pass
-
-    def _clear_dash(self, ui):
-        if self._eink_body:
-            for i in range(5):
-                ui.set("vd_l%d" % (i + 1), "")
-        if self._face_blanked:
-            try:
-                import pwnagotchi.ui.faces as faces
-                ui.set("face", getattr(faces, "AWAKE", "(^‿^)"))
-            except Exception:
-                pass
-            self._face_blanked = False
-
-    def _eink_data(self):
-        """Compact dashboard values for the e-ink (throttled to ~5s)."""
-        now = time.time()
-        if self._eink_cache and now - self._eink_cache_at < 5:
-            return self._eink_cache
-        try:
-            bc = "жив" if self._port_open(8081) else "нет"
-            gr = "жив" if self._port_open(8666) else "нет"
-            dex = self._read_dex()
-            cracked = sum(1 for e in dex.values() if e.get("pw"))
-            lines = [
-                "bcap:%s  grid:%s" % (bc, gr),
-                "IP %s" % self._read_ip(),
-                ".pcap %d    рядом %d" % (
-                    self._pcap_count(), len(self._nearby)),
-                "хендш %d   пароли %d" % (
-                    self._hs_total, cracked),
-                "t %s°C  cpu %s%%  mem %s%%" % (
-                    self._read_temp(), self._read_cpu(), self._read_mem()),
-            ]
-        except Exception:
-            lines = ["", "", "", "", ""]
-        self._eink_cache = lines
-        self._eink_cache_at = now
-        return lines
 
     def on_unload(self, ui):
-        for key in ("vslider_sw", "vd_l1", "vd_l2", "vd_l3", "vd_l4", "vd_l5"):
+        try:
+            ui.remove_element("vdash")
+        except Exception:
+            pass
+
+    def _advance_tab(self):
+        now = time.time()
+        if now - self._tab_since >= self.TAB_DUR[self._tab_idx % 5]:
+            self._tab_idx = (self._tab_idx + 1) % 5
+            self._tab_since = now
+
+    # ---- drawing primitives ----------------------------------------------
+    @staticmethod
+    def _tw(drawer, text, font):
+        try:
+            return drawer.textlength(text, font=font)
+        except Exception:
             try:
-                ui.remove_element(key)
+                b = font.getbbox(text)
+                return b[2] - b[0]
             except Exception:
-                pass
-        if self._face_blanked:
-            try:
-                import pwnagotchi.ui.faces as faces
-                ui.set("face", getattr(faces, "AWAKE", "(^‿^)"))
-            except Exception:
-                pass
+                return len(text) * 6
+
+    @staticmethod
+    def _rr(drawer, xy, r, outline=0x00, fill=0xFF, width=1):
+        try:
+            drawer.rounded_rectangle(xy, radius=r, outline=outline, fill=fill, width=width)
+        except Exception:
+            drawer.rectangle(xy, outline=outline, fill=fill, width=width)
+
+    def _draw_eink(self, canvas, drawer):
+        if self._pos != POS_DASH or not self._eink:
+            return
+        try:
+            W, H = canvas.size
+        except Exception:
+            W, H = 250, 122
+        try:
+            import pwnagotchi.ui.fonts as fonts
+            self._f_small = getattr(fonts, "Small", None)
+            self._f_val = (getattr(fonts, "BoldSmall", None)
+                           or getattr(fonts, "Medium", None)
+                           or getattr(fonts, "Bold", None) or self._f_small)
+        except Exception:
+            return
+        drawer.rectangle((0, 0, W, H), fill=0xFF)       # cover the normal UI
+        data = self._eink_refresh()
+        self._draw_tabs(drawer, W)
+        t = self._tab_idx
+        if t == 1:
+            self._tab_sys(drawer, W, H, data)
+        elif t == 2:
+            self._tab_comic(drawer, W, H)
+        elif t == 3:
+            self._tab_keys(drawer, W, H, data)
+        elif t == 4:
+            self._tab_five(drawer, W, H)
+        else:
+            self._tab_hunt(drawer, W, H, data)
+
+    def _draw_tabs(self, drawer, W):
+        names = ["Hunt", "Sys", "Comic", "Keys", "#5"]
+        bw = W / 5.0
+        for i, nm in enumerate(names):
+            x0, x1 = i * bw + 1, (i + 1) * bw - 1
+            inv = (i == self._tab_idx)
+            self._rr(drawer, (x0, 0, x1, 13), 4, fill=(0x00 if inv else 0xFF))
+            w = self._tw(drawer, nm, self._f_small)
+            drawer.text((x0 + (x1 - x0 - w) / 2, 1), nm, font=self._f_small,
+                        fill=(0xFF if inv else 0x00))
+
+    def _spark(self, drawer, x0, y0, x1, y1, series):
+        a = [v for v in (series or []) if isinstance(v, (int, float))]
+        if len(a) < 2:
+            return
+        lo, hi = min(a), max(a)
+        if hi <= lo:
+            hi = lo + 1
+        n = len(a)
+        pts = [(x0 + (x1 - x0) * i / (n - 1),
+                y1 - (v - lo) / (hi - lo) * (y1 - y0)) for i, v in enumerate(a)]
+        drawer.line(pts, fill=0x00, width=1)
+
+    def _card(self, drawer, x0, y0, x1, y1, label, val, series):
+        self._rr(drawer, (x0, y0, x1, y1), 6)
+        drawer.text((x0 + 5, y0 + 2), label, font=self._f_small, fill=0x00)
+        vw = self._tw(drawer, val, self._f_val)
+        drawer.text((x1 - 5 - vw, y0 + 1), val, font=self._f_val, fill=0x00)
+        self._spark(drawer, x0 + 5, y0 + 20, x1 - 5, y1 - 10, series)
+        drawer.text((x0 + 5, y1 - 10), "-5m", font=self._f_small, fill=0x00)
+        drawer.text((x1 - 5 - self._tw(drawer, "now", self._f_small), y1 - 10),
+                    "now", font=self._f_small, fill=0x00)
+
+    def _tab_sys(self, drawer, W, H, d):
+        mx = W // 2
+        self._card(drawer, 2, 16, mx - 1, 68, "Temp", self._ftemp(d.get("temp")), d.get("ht"))
+        self._card(drawer, mx + 1, 16, W - 2, 68, "CPU", "%s%%" % self._i(d.get("cpu")), d.get("hc"))
+        self._card(drawer, 2, 70, mx - 1, H - 1, "RAM", "%s%%" % self._i(d.get("mem")), d.get("hm"))
+        self._rr(drawer, (mx + 1, 70, W - 2, H - 1), 6)
+        drawer.text((mx + 6, 72), "SD free", font=self._f_small, fill=0x00)
+        v = "%sG" % d.get("sd_free", "?")
+        drawer.text((W - 7 - self._tw(drawer, v, self._f_val), 71), v, font=self._f_val, fill=0x00)
+        drawer.text((mx + 6, H - 20), "IP %s" % d.get("ip", ""), font=self._f_small, fill=0x00)
+
+    def _tab_hunt(self, drawer, W, H, d):
+        self._rr(drawer, (3, 18, 58, 73), 5)
+        import random
+        random.seed(7)
+        for yy in range(24, 68, 4):
+            for xx in range(9, 52, 4):
+                if random.random() > 0.5:
+                    drawer.rectangle((xx, yy, xx + 2, yy + 2), fill=0x00)
+        drawer.text((8, 75), "Wi-Fi QR", font=self._f_small, fill=0x00)
+        rows = [
+            ("Hash/min", d.get("permin", 0)), ("Total", d.get("total", 0)),
+            ("Session", d.get("session", 0)), ("Caught", d.get("caught", 0)),
+            ("Seen", d.get("seen", 0)), ("w/Pass", d.get("cracked", 0)),
+            ("Temp", self._ftemp(d.get("temp"))), ("Streak", "%sd" % d.get("streak", 0)),
+            ("Near", d.get("near", 0)), ("Chan", d.get("chan", "-")),
+        ]
+        cols = [64, W // 2 + 4]
+        cw = W // 2 - 66
+        for i, (k, v) in enumerate(rows):
+            cx = cols[i % 2]
+            cy = 18 + (i // 2) * 14
+            self._rr(drawer, (cx, cy, cx + cw, cy + 12), 4)
+            drawer.text((cx + 4, cy), k, font=self._f_small, fill=0x00)
+            vs = str(v)
+            drawer.text((cx + cw - 4 - self._tw(drawer, vs, self._f_small), cy), vs,
+                        font=self._f_small, fill=0x00)
+        self._rr(drawer, (2, H - 16, W - 2, H - 1), 6, fill=0x00)
+        bar = "AP: %s   pass: %s" % (self._conn.get("ssid"), self._conn.get("pass"))
+        drawer.text(((W - self._tw(drawer, bar, self._f_small)) / 2, H - 15), bar,
+                    font=self._f_small, fill=0xFF)
+
+    def _tab_keys(self, drawer, W, H, d):
+        drawer.text((5, 17), "Cracked networks", font=self._f_small, fill=0x00)
+        lst = d.get("cracked_list") or []
+        if not lst:
+            drawer.text((5, 42), "no cracked networks yet", font=self._f_small, fill=0x00)
+            return
+        y = 31
+        for ssid, pw in lst[:6]:
+            self._rr(drawer, (3, y, W - 3, y + 13), 3)
+            drawer.text((6, y + 1), self._clip(ssid, 16), font=self._f_small, fill=0x00)
+            ps = str(pw)
+            drawer.text((W - 7 - self._tw(drawer, ps, self._f_small), y + 1), ps,
+                        font=self._f_small, fill=0x00)
+            y += 15
+
+    def _tab_comic(self, drawer, W, H):
+        frames = [("(•‿•)", "on duty"), ("(⌐■_■)", "a catch!"),
+                  ("(－‿－)", "quiet")]
+        bw = (W - 8) // 3
+        for i, (face, cap) in enumerate(frames):
+            x0 = 2 + i * (bw + 2)
+            self._rr(drawer, (x0, 20, x0 + bw, H - 4), 6)
+            drawer.text((x0 + (bw - self._tw(drawer, face, self._f_val)) / 2, 42),
+                        face, font=self._f_val, fill=0x00)
+            drawer.text((x0 + (bw - self._tw(drawer, cap, self._f_small)) / 2, H - 22),
+                        cap, font=self._f_small, fill=0x00)
+
+    def _tab_five(self, drawer, W, H):
+        drawer.text(((W - self._tw(drawer, "Reserved", self._f_val)) / 2, 50),
+                    "Reserved", font=self._f_val, fill=0x00)
+        drawer.text(((W - self._tw(drawer, "coming soon", self._f_small)) / 2, 74),
+                    "coming soon", font=self._f_small, fill=0x00)
+
+    # ---- data + formatting ------------------------------------------------
+    def _eink_refresh(self):
+        now = time.time()
+        if self._eink_cache and now - self._eink_cache_at < 4:
+            return self._eink_cache
+        d = {}
+        try:
+            d["temp"] = self._read_temp()
+            d["cpu"] = self._read_cpu()
+            d["mem"] = self._read_mem()
+            _, free = self._read_sd()
+            d["sd_free"] = free
+            d["ht"] = list(self._hist["temp"])
+            d["hc"] = list(self._hist["cpu"])
+            d["hm"] = list(self._hist["mem"])
+            d["ip"] = self._read_ip()
+            d["near"] = len(self._nearby)
+            dex = self._read_dex()
+            cr = [e for e in dex.values() if e.get("pw")]
+            cr.sort(key=lambda e: (e.get("pw_at") or e.get("last") or 0), reverse=True)
+            d["cracked"] = len(cr)
+            d["cracked_list"] = [(e.get("ssid") or "(hidden)", e.get("pw")) for e in cr[:6]]
+            d["permin"] = sum(1 for t in self._hs_times if t >= now - 60)
+            d["total"] = self._hs_total
+            d["session"] = self._hs_session
+            d["caught"] = sum(1 for e in dex.values() if e.get("caught"))
+            d["seen"] = len(dex)
+            ch = {}
+            for ap in self._nearby:
+                if ap.get("ch"):
+                    ch[ap["ch"]] = ch.get(ap["ch"], 0) + 1
+            d["chan"] = max(ch, key=ch.get) if ch else "-"
+            d["streak"] = self._streak
+        except Exception:
+            pass
+        self._eink_cache = d
+        self._eink_cache_at = now
+        return d
+
+    @staticmethod
+    def _ftemp(v):
+        try:
+            return "%.1f°" % float(v)
+        except Exception:
+            return "%s°" % (v if v is not None else "?")
+
+    @staticmethod
+    def _i(v):
+        try:
+            return int(round(float(v)))
+        except Exception:
+            return v if v is not None else "?"
+
+    @staticmethod
+    def _clip(s, n):
+        s = str(s or "")
+        return s if len(s) <= n else s[:n - 1] + "…"
 
     # --- persistence -------------------------------------------------------
     def _load_state(self):
