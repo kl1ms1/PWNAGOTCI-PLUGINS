@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.5.0"
+    __version__ = "0.5.1"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -92,6 +92,7 @@ class Vslider(plugins.Plugin):
         self._eink_cache = None           # throttled dashboard values
         self._eink_cache_at = 0
         self._tab_idx = 0                 # which dashboard tab is showing
+        self._sub_idx = 0                 # sub-page within the current tab
         self._tab_since = 0.0
         self._anim_frames = []            # pending switch-animation frames
         self._recon_state = None          # "on"/"off" — avoid spamming bettercap
@@ -217,7 +218,8 @@ class Vslider(plugins.Plugin):
         self._anim_frames = frames
 
     # --- e-ink: full-screen dashboard (Dashboard / pos 2) ------------------
-    TAB_DUR = (5, 15, 5, 10, 5)        # seconds per tab (Hunt..#5)
+    SUB_N = (1, 3, 1, 2, 1)    # sub-pages per tab (Hunt·Sys·Comic·Keys·#5)
+    SUB_DUR = 5                # seconds per sub-page (Sys=3×5=15s, Keys=2×5=10s)
 
     def on_ui_setup(self, ui):
         self._ui = ui
@@ -227,6 +229,7 @@ class Vslider(plugins.Plugin):
             ui.add_element("vdash", _DashWidget(self))
             self._eink_added = True
             self._tab_since = time.time()
+            self._sub_idx = 0
         except Exception:
             logging.debug("[vslider] could not add e-ink dashboard")
 
@@ -258,8 +261,13 @@ class Vslider(plugins.Plugin):
 
     def _advance_tab(self):
         now = time.time()
-        if now - self._tab_since >= self.TAB_DUR[self._tab_idx % 5]:
-            self._tab_idx = (self._tab_idx + 1) % 5
+        if now - self._tab_since >= self.SUB_DUR:
+            # advance the sub-page; when the tab's sub-pages are exhausted,
+            # move on to the next tab (so Sys lasts 3×5s, Keys 2×5s, etc.)
+            self._sub_idx += 1
+            if self._sub_idx >= self.SUB_N[self._tab_idx % 5]:
+                self._sub_idx = 0
+                self._tab_idx = (self._tab_idx + 1) % 5
             self._tab_since = now
 
     # ---- drawing primitives ----------------------------------------------
@@ -301,11 +309,11 @@ class Vslider(plugins.Plugin):
         self._draw_tabs(drawer, W)
         t = self._tab_idx
         if t == 1:
-            self._tab_sys(drawer, W, H, data)
+            self._tab_sys(drawer, W, H, data, self._sub_idx)
         elif t == 2:
             self._tab_comic(drawer, W, H)
         elif t == 3:
-            self._tab_keys(drawer, W, H, data)
+            self._tab_keys(drawer, W, H, data, self._sub_idx)
         elif t == 4:
             self._tab_five(drawer, W, H)
         else:
@@ -344,16 +352,43 @@ class Vslider(plugins.Plugin):
         drawer.text((x1 - 5 - self._tw(drawer, "now", self._f_small), y1 - 10),
                     "now", font=self._f_small, fill=0x00)
 
-    def _tab_sys(self, drawer, W, H, d):
+    def _vcard(self, drawer, x0, y0, x1, y1, label, val, small=False):
+        self._rr(drawer, (x0, y0, x1, y1), 6)
+        drawer.text((x0 + 5, y0 + 3), label, font=self._f_small, fill=0x00)
+        f = self._f_small if small else self._f_val
+        vw = self._tw(drawer, val, f)
+        drawer.text((x1 - 5 - vw, (y0 + y1) / 2 - 4), val, font=f, fill=0x00)
+
+    def _subdots(self, drawer, W, H, n, cur):
+        if n <= 1:
+            return
+        dw, gap = 9, 4
+        x = (W - (n * dw + (n - 1) * gap)) / 2.0
+        y = H - 4
+        for i in range(n):
+            self._rr(drawer, (x, y - 2, x + dw, y + 1), 1,
+                     fill=(0x00 if i == cur else 0xFF))
+            x += dw + gap
+
+    def _tab_sys(self, drawer, W, H, d, sub):
         mx = W // 2
-        self._card(drawer, 2, 16, mx - 1, 68, "Temp", self._ftemp(d.get("temp")), d.get("ht"))
-        self._card(drawer, mx + 1, 16, W - 2, 68, "CPU", "%s%%" % self._i(d.get("cpu")), d.get("hc"))
-        self._card(drawer, 2, 70, mx - 1, H - 1, "RAM", "%s%%" % self._i(d.get("mem")), d.get("hm"))
-        self._rr(drawer, (mx + 1, 70, W - 2, H - 1), 6)
-        drawer.text((mx + 6, 72), "SD free", font=self._f_small, fill=0x00)
-        v = "%sG" % d.get("sd_free", "?")
-        drawer.text((W - 7 - self._tw(drawer, v, self._f_val), 71), v, font=self._f_val, fill=0x00)
-        drawer.text((mx + 6, H - 20), "IP %s" % d.get("ip", ""), font=self._f_small, fill=0x00)
+        bot = H - 6
+        if sub == 1:
+            self._vcard(drawer, 2, 16, mx - 1, 65, "Load", str(d.get("load", "?")))
+            self._vcard(drawer, mx + 1, 16, W - 2, 65, "Freq", "%sM" % self._i(d.get("freq")))
+            self._vcard(drawer, 2, 67, mx - 1, bot, "Uptime", self._upt(d.get("uptime")))
+            self._vcard(drawer, mx + 1, 67, W - 2, bot, "Near", str(d.get("near", 0)))
+        elif sub == 2:
+            self._vcard(drawer, 2, 16, mx - 1, 65, "bettercap", "OK" if d.get("bc") else "--")
+            self._vcard(drawer, mx + 1, 16, W - 2, 65, "pwngrid", "OK" if d.get("gr") else "--")
+            self._vcard(drawer, 2, 67, mx - 1, bot, ".pcap", str(d.get("pcaps", 0)))
+            self._vcard(drawer, mx + 1, 67, W - 2, bot, "IP", str(d.get("ip", "")), small=True)
+        else:
+            self._card(drawer, 2, 16, mx - 1, 65, "Temp", self._ftemp(d.get("temp")), d.get("ht"))
+            self._card(drawer, mx + 1, 16, W - 2, 65, "CPU", "%s%%" % self._i(d.get("cpu")), d.get("hc"))
+            self._card(drawer, 2, 67, mx - 1, bot, "RAM", "%s%%" % self._i(d.get("mem")), d.get("hm"))
+            self._vcard(drawer, mx + 1, 67, W - 2, bot, "SD free", "%sG" % d.get("sd_free", "?"))
+        self._subdots(drawer, W, H, 3, sub)
 
     def _tab_hunt(self, drawer, W, H, d):
         self._rr(drawer, (3, 18, 58, 73), 5)
@@ -386,20 +421,28 @@ class Vslider(plugins.Plugin):
         drawer.text(((W - self._tw(drawer, bar, self._f_small)) / 2, H - 15), bar,
                     font=self._f_small, fill=0xFF)
 
-    def _tab_keys(self, drawer, W, H, d):
-        drawer.text((5, 17), "Cracked networks", font=self._f_small, fill=0x00)
-        lst = d.get("cracked_list") or []
+    def _tab_keys(self, drawer, W, H, d, sub):
+        if sub == 1:
+            drawer.text((5, 17), "Nearby networks", font=self._f_small, fill=0x00)
+            lst = d.get("nearby_list") or []
+            empty = "no networks nearby"
+        else:
+            drawer.text((5, 17), "Cracked networks", font=self._f_small, fill=0x00)
+            lst = d.get("cracked_list") or []
+            empty = "no cracked networks yet"
         if not lst:
-            drawer.text((5, 42), "no cracked networks yet", font=self._f_small, fill=0x00)
+            drawer.text((5, 42), empty, font=self._f_small, fill=0x00)
+            self._subdots(drawer, W, H, 2, sub)
             return
         y = 31
-        for ssid, pw in lst[:6]:
+        for ssid, pw in lst[:5]:
             self._rr(drawer, (3, y, W - 3, y + 13), 3)
-            drawer.text((6, y + 1), self._clip(ssid, 16), font=self._f_small, fill=0x00)
-            ps = str(pw)
+            drawer.text((6, y + 1), self._clip(ssid, 14), font=self._f_small, fill=0x00)
+            ps = str(pw) if pw else "-"
             drawer.text((W - 7 - self._tw(drawer, ps, self._f_small), y + 1), ps,
                         font=self._f_small, fill=0x00)
             y += 15
+        self._subdots(drawer, W, H, 2, sub)
 
     def _tab_comic(self, drawer, W, H):
         frames = [("(•‿•)", "on duty"), ("(⌐■_■)", "a catch!"),
@@ -436,11 +479,31 @@ class Vslider(plugins.Plugin):
             d["hm"] = list(self._hist["mem"])
             d["ip"] = self._read_ip()
             d["near"] = len(self._nearby)
+            d["load"] = self._read_load()
+            d["freq"] = self._read_freq()
+            d["uptime"] = self._read_uptime()
+            d["bc"] = self._port_open(8081)
+            d["gr"] = self._port_open(8666)
+            d["pcaps"] = self._pcap_count()
             dex = self._read_dex()
             cr = [e for e in dex.values() if e.get("pw")]
             cr.sort(key=lambda e: (e.get("pw_at") or e.get("last") or 0), reverse=True)
             d["cracked"] = len(cr)
             d["cracked_list"] = [(e.get("ssid") or "(hidden)", e.get("pw")) for e in cr[:6]]
+            # nearby: with-password first, then by signal
+            by_mac = {(k or "").upper(): v for k, v in dex.items()}
+            nl, seen = [], set()
+            for ap in self._nearby:
+                mac = (ap.get("mac") or "").upper()
+                if not mac or mac in seen:
+                    continue
+                seen.add(mac)
+                e = by_mac.get(mac)
+                name = ap.get("ssid") or (e.get("ssid") if e else "") or "(hidden)"
+                pw = (e.get("pw") if e else "") or ""
+                nl.append((name, pw, ap.get("rssi", -99)))
+            nl.sort(key=lambda x: (x[1] == "", -x[2]))
+            d["nearby_list"] = [(n, p) for (n, p, _r) in nl[:6]]
             d["permin"] = sum(1 for t in self._hs_times if t >= now - 60)
             d["total"] = self._hs_total
             d["session"] = self._hs_session
@@ -476,6 +539,19 @@ class Vslider(plugins.Plugin):
     def _clip(s, n):
         s = str(s or "")
         return s if len(s) <= n else s[:n - 1] + "…"
+
+    @staticmethod
+    def _upt(s):
+        try:
+            s = int(s)
+        except Exception:
+            return "?"
+        dd, hh, mm = s // 86400, (s % 86400) // 3600, (s % 3600) // 60
+        if dd:
+            return "%dd%dh" % (dd, hh)
+        if hh:
+            return "%dh%dm" % (hh, mm)
+        return "%dm" % mm
 
     # --- persistence -------------------------------------------------------
     def _load_state(self):

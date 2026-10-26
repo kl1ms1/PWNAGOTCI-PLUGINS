@@ -78,6 +78,11 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.5.1
+- E-ink tabs now have **sub-pages** that rotate every 5 s, matching the web:
+  **System** = 3 pages (graphs → load/freq/uptime/near → bettercap/pwngrid/.pcap/IP,
+  = 15 s) and **Keys** = 2 pages (cracked → nearby, = 10 s), with little page dots.
+
 ### 0.5.0
 - **Full web-style dashboard on the e-ink** (Dashboard / pos 2): a real
   full-screen takeover drawn by a custom widget — rounded tab bar at the top
