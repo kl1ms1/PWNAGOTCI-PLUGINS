@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.5.2"
+    __version__ = "0.5.3"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -71,7 +71,8 @@ class Vslider(plugins.Plugin):
         self._agent = None
         self._cpu_prev = None
         self._hist = {"temp": deque(maxlen=HIST), "cpu": deque(maxlen=HIST),
-                      "mem": deque(maxlen=HIST)}
+                      "mem": deque(maxlen=HIST), "load": deque(maxlen=HIST),
+                      "near": deque(maxlen=HIST), "hs": deque(maxlen=HIST)}
         self._hist_t = deque(maxlen=HIST)   # timestamp per sample (for the time axis)
         self._nearby = []                 # current scan: [{ssid,mac,ch,rssi}]
         self._unfiltered_at = 0           # last time we got the UNFILTERED ap list
@@ -374,14 +375,15 @@ class Vslider(plugins.Plugin):
         mx = W // 2
         bot = H - 6
         if sub == 1:
-            self._vcard(drawer, 2, 16, mx - 1, 65, "Load", str(d.get("load", "?")))
-            self._vcard(drawer, mx + 1, 16, W - 2, 65, "Freq", "%sM" % self._i(d.get("freq")))
-            self._vcard(drawer, 2, 67, mx - 1, bot, "Uptime", self._upt(d.get("uptime")))
-            self._vcard(drawer, mx + 1, 67, W - 2, bot, "Near", str(d.get("near", 0)))
+            # more trend graphs (statistics over time)
+            self._card(drawer, 2, 16, mx - 1, 65, "Load", str(d.get("load", "?")), d.get("hl"))
+            self._card(drawer, mx + 1, 16, W - 2, 65, "Near", str(d.get("near", 0)), d.get("hn"))
+            self._card(drawer, 2, 67, mx - 1, bot, "Hash/min", str(d.get("permin", 0)), d.get("hh"))
+            self._vcard(drawer, mx + 1, 67, W - 2, bot, "Freq", "%sM" % self._i(d.get("freq")))
         elif sub == 2:
             self._vcard(drawer, 2, 16, mx - 1, 65, "bettercap", "OK" if d.get("bc") else "--")
             self._vcard(drawer, mx + 1, 16, W - 2, 65, "pwngrid", "OK" if d.get("gr") else "--")
-            self._vcard(drawer, 2, 67, mx - 1, bot, ".pcap", str(d.get("pcaps", 0)))
+            self._vcard(drawer, 2, 67, mx - 1, bot, "Uptime", self._upt(d.get("uptime")))
             self._vcard(drawer, mx + 1, 67, W - 2, bot, "IP", str(d.get("ip", "")), small=True)
         else:
             self._card(drawer, 2, 16, mx - 1, 65, "Temp", self._ftemp(d.get("temp")), d.get("ht"))
@@ -477,6 +479,9 @@ class Vslider(plugins.Plugin):
             d["ht"] = list(self._hist["temp"])
             d["hc"] = list(self._hist["cpu"])
             d["hm"] = list(self._hist["mem"])
+            d["hl"] = list(self._hist["load"])
+            d["hn"] = list(self._hist["near"])
+            d["hh"] = list(self._hist["hs"])
             d["ip"] = self._read_ip()
             d["near"] = len(self._nearby)
             d["load"] = self._read_load()
@@ -712,10 +717,17 @@ class Vslider(plugins.Plugin):
             return 0
 
     def _sample_sys(self):
+        now = int(time.time())
         self._hist["temp"].append(self._read_temp())
         self._hist["cpu"].append(self._read_cpu())
         self._hist["mem"].append(self._read_mem())
-        self._hist_t.append(int(time.time()))
+        try:
+            self._hist["load"].append(float(self._read_load()))
+        except Exception:
+            self._hist["load"].append(0.0)
+        self._hist["near"].append(len(self._nearby))
+        self._hist["hs"].append(sum(1 for t in self._hs_times if t >= now - 60))
+        self._hist_t.append(now)
 
     # --- pwndex / wpa-sec --------------------------------------------------
     def _read_dex(self):

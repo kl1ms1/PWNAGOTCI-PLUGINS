@@ -78,6 +78,10 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.5.3
+- More **trend graphs** on the e-ink System page (sub-page 2): sparklines for
+  Load, Nearby networks and Hash/min, sampled over time (not just temp/CPU/RAM).
+
 ### 0.5.2
 - The e-ink dashboard now always **starts on the Hunt tab** when you switch to
   Dashboard (pos 2), instead of resuming mid-rotation.
