@@ -74,6 +74,18 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.4.0
+- **On-screen (e-ink) mode slider** — the current position now shows on the
+  device screen itself (`[#··]Auto` / `[·#·]Dash` / `[··#]Sync`), and switching
+  plays a little knob-slide across the track (step animation — e-ink can't do
+  smooth). Position configurable via `eink_position`, toggle with `eink`.
+- **Fixed Dashboard looking "stuck searching"**: in Dashboard the screen now
+  clearly says *"Дашборд · охота на паузе ⏸"* with a calm face (hunting is
+  paused there by design), instead of the misleading recon animation with 0 nets.
+- **Reliable resume**: recon state is tracked and re-asserted each epoch, so
+  switching Dashboard → Auto always turns hunting back on (and we no longer spam
+  bettercap every epoch).
+
 ### 0.3.1
 - **Passwords tab fixes:** the **Cracked** list is now sorted **newest-saved first**
   (by when the password was added) and shows a small **age** (сейчас/1ч/1д) per row.

@@ -35,7 +35,7 @@ HIST = 60
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.3.1"
+    __version__ = "0.4.0"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -61,6 +61,13 @@ class Vslider(plugins.Plugin):
         self._hs_dir = "/home/pi/handshakes"
         self._potfile = os.path.join(self._hs_dir, "wpa-sec.cracked.potfile")
         self._conn = {"ssid": "pwn-ap", "pass": "changeme", "web": ""}
+        # --- e-ink screen output ---
+        self._ui = None
+        self._eink = True                 # show the mode slider on the e-ink
+        self._eink_pos = (92, 0)          # top-center-ish; configurable
+        self._eink_added = False
+        self._anim_frames = []            # pending switch-animation frames
+        self._recon_state = None          # "on"/"off" — avoid spamming bettercap
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
@@ -70,6 +77,14 @@ class Vslider(plugins.Plugin):
         self._conn["pass"] = o.get("ap_pass", self._conn["pass"])
         self._conn["web"] = o.get("web", self._conn["web"])
         self._dex_f = o.get("pwndex", self._dex_f)
+        self._eink = bool(o.get("eink", True))
+        pos = o.get("eink_position")
+        if pos:
+            try:
+                x, y = str(pos).split(",")
+                self._eink_pos = (int(x), int(y))
+            except Exception:
+                pass
         self._load_state()
         self._load_stats()
         logging.info("[vslider] loaded (pos=%d, hs_total=%d)", self._pos, self._hs_total)
@@ -89,8 +104,9 @@ class Vslider(plugins.Plugin):
     def on_epoch(self, agent, epoch, epoch_data):
         self._agent = agent
         self._sample_sys()
-        if self._pos == POS_DASH:
-            self._run("wifi.recon off")   # keep hunting fully paused
+        # keep recon in the right state every epoch: OFF only on Dashboard,
+        # ON otherwise — so switching back to Auto reliably RESUMES hunting.
+        self._set_recon(self._pos != POS_DASH)
 
     def on_handshake(self, agent, filename, access_point, client_station):
         self._hs_total += 1
@@ -140,10 +156,79 @@ class Vslider(plugins.Plugin):
             logging.debug("[vslider] run failed: %s", cmd)
 
     def _apply(self):
-        if self._pos == POS_AUTO:
-            self._run("wifi.recon on")
-        elif self._pos == POS_DASH:
-            self._run("wifi.recon off")
+        # Dashboard pauses hunting; Auto (and reserved pos 3) hunt normally.
+        self._set_recon(self._pos != POS_DASH)
+
+    def _set_recon(self, on):
+        """Turn wifi recon on/off, but only issue the command on a real change
+        (so we don't spam bettercap every epoch)."""
+        want = "on" if on else "off"
+        if self._recon_state != want:
+            self._run("wifi.recon " + want)
+            self._recon_state = want
+
+    # --- e-ink screen output ----------------------------------------------
+    _NAMES = {POS_AUTO: "Auto", POS_DASH: "Dash", POS_X: "Sync"}
+
+    @staticmethod
+    def _knob(slot):
+        cells = ["·", "·", "·"]   # ·
+        if 1 <= slot <= 3:
+            cells[slot - 1] = "#"
+        return "[" + "".join(cells) + "]"
+
+    def _eink_tag(self, pos):
+        return "%s%s" % (self._knob(pos), self._NAMES.get(pos, "?"))
+
+    def _queue_anim(self, old, new):
+        """Build the little slide: knob stepping from old slot to new slot."""
+        if old == new:
+            return
+        step = 1 if new > old else -1
+        frames = ["%s %s" % (self._knob(s), self._NAMES.get(new, "?"))
+                  for s in range(old, new + step, step)]
+        self._anim_frames = frames
+
+    def on_ui_setup(self, ui):
+        self._ui = ui
+        if not self._eink:
+            return
+        try:
+            from pwnagotchi.ui.components import Text
+            from pwnagotchi.ui.view import BLACK
+            import pwnagotchi.ui.fonts as fonts
+            ui.add_element("vslider_sw", Text(
+                value=self._eink_tag(self._pos), position=self._eink_pos,
+                font=fonts.Small, color=BLACK))
+            self._eink_added = True
+        except Exception:
+            logging.debug("[vslider] could not add e-ink element")
+
+    def on_ui_update(self, ui):
+        self._ui = ui
+        if not (self._eink and self._eink_added):
+            return
+        try:
+            if self._anim_frames:
+                ui.set("vslider_sw", self._anim_frames.pop(0))   # play one step
+            else:
+                ui.set("vslider_sw", self._eink_tag(self._pos))
+                # make Dashboard clearly a PAUSE, not a broken "searching" state
+                if self._pos == POS_DASH:
+                    ui.set("status", "Дашборд · "
+                           "охота на паузе ⏸")
+                    import pwnagotchi.ui.faces as faces
+                    f = getattr(faces, "SLEEP", None) or getattr(faces, "BORED", None)
+                    if f:
+                        ui.set("face", f)
+        except Exception:
+            pass
+
+    def on_unload(self, ui):
+        try:
+            ui.remove_element("vslider_sw")
+        except Exception:
+            pass
 
     # --- persistence -------------------------------------------------------
     def _load_state(self):
@@ -454,7 +539,9 @@ class Vslider(plugins.Plugin):
                 return jsonify(ok=False, msg="bad pos"), 400
             if pos not in (POS_AUTO, POS_DASH, POS_X):
                 return jsonify(ok=False, msg="bad pos"), 400
+            old = self._pos
             self._pos = pos
+            self._queue_anim(old, pos)      # slide the knob on the e-ink too
             self._apply()
             self._save_state()
             return jsonify(ok=True, pos=self._pos)
