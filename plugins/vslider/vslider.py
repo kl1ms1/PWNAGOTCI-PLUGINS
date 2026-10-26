@@ -35,7 +35,7 @@ HIST = 60
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.4.0"
+    __version__ = "0.4.1"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -66,6 +66,10 @@ class Vslider(plugins.Plugin):
         self._eink = True                 # show the mode slider on the e-ink
         self._eink_pos = (92, 0)          # top-center-ish; configurable
         self._eink_added = False
+        self._eink_body = False           # the full-screen dashboard text lines
+        self._face_blanked = False
+        self._eink_cache = None           # throttled dashboard values
+        self._eink_cache_at = 0
         self._anim_frames = []            # pending switch-animation frames
         self._recon_state = None          # "on"/"off" — avoid spamming bettercap
 
@@ -197,10 +201,15 @@ class Vslider(plugins.Plugin):
             from pwnagotchi.ui.components import Text
             from pwnagotchi.ui.view import BLACK
             import pwnagotchi.ui.fonts as fonts
-            ui.add_element("vslider_sw", Text(
-                value=self._eink_tag(self._pos), position=self._eink_pos,
-                font=fonts.Small, color=BLACK))
             self._eink_added = True
+            # full-screen dashboard body lines (shown in Dashboard mode).
+            # The switch animation plays in the status line, so there is no
+            # separate top tag that could collide with the clock/uptime.
+            for i in range(5):
+                ui.add_element("vd_l%d" % (i + 1), Text(
+                    value="", position=(5, 14 + i * 13),
+                    font=fonts.Small, color=BLACK))
+            self._eink_body = True
         except Exception:
             logging.debug("[vslider] could not add e-ink element")
 
@@ -209,26 +218,84 @@ class Vslider(plugins.Plugin):
         if not (self._eink and self._eink_added):
             return
         try:
+            # switch animation: the knob slides across the status line
+            anim = False
             if self._anim_frames:
-                ui.set("vslider_sw", self._anim_frames.pop(0))   # play one step
+                ui.set("status", self._anim_frames.pop(0))
+                anim = True
+            # Dashboard (pos 2): fill the screen with the live data (like the web).
+            if self._pos == POS_DASH:
+                self._render_dash(ui, skip_status=anim)
             else:
-                ui.set("vslider_sw", self._eink_tag(self._pos))
-                # make Dashboard clearly a PAUSE, not a broken "searching" state
-                if self._pos == POS_DASH:
-                    ui.set("status", "Дашборд · "
-                           "охота на паузе ⏸")
-                    import pwnagotchi.ui.faces as faces
-                    f = getattr(faces, "SLEEP", None) or getattr(faces, "BORED", None)
-                    if f:
-                        ui.set("face", f)
+                self._clear_dash(ui)
         except Exception:
             pass
 
-    def on_unload(self, ui):
+    def _render_dash(self, ui, skip_status=False):
+        lines = self._eink_data()
+        if self._eink_body:
+            for i in range(5):
+                ui.set("vd_l%d" % (i + 1), lines[i] if i < len(lines) else "")
+        # short title in the speech line; data lives in the body
+        if not skip_status:
+            ui.set("status", "Дашборд · "
+                   "охота на паузе")
         try:
-            ui.remove_element("vslider_sw")
+            ui.set("face", "")        # free the center for the data
+            self._face_blanked = True
         except Exception:
             pass
+
+    def _clear_dash(self, ui):
+        if self._eink_body:
+            for i in range(5):
+                ui.set("vd_l%d" % (i + 1), "")
+        if self._face_blanked:
+            try:
+                import pwnagotchi.ui.faces as faces
+                ui.set("face", getattr(faces, "AWAKE", "(^‿^)"))
+            except Exception:
+                pass
+            self._face_blanked = False
+
+    def _eink_data(self):
+        """Compact dashboard values for the e-ink (throttled to ~5s)."""
+        now = time.time()
+        if self._eink_cache and now - self._eink_cache_at < 5:
+            return self._eink_cache
+        try:
+            bc = "жив" if self._port_open(8081) else "нет"
+            gr = "жив" if self._port_open(8666) else "нет"
+            dex = self._read_dex()
+            cracked = sum(1 for e in dex.values() if e.get("pw"))
+            lines = [
+                "bcap:%s  grid:%s" % (bc, gr),
+                "IP %s" % self._read_ip(),
+                ".pcap %d    рядом %d" % (
+                    self._pcap_count(), len(self._nearby)),
+                "хендш %d   пароли %d" % (
+                    self._hs_total, cracked),
+                "t %s°C  cpu %s%%  mem %s%%" % (
+                    self._read_temp(), self._read_cpu(), self._read_mem()),
+            ]
+        except Exception:
+            lines = ["", "", "", "", ""]
+        self._eink_cache = lines
+        self._eink_cache_at = now
+        return lines
+
+    def on_unload(self, ui):
+        for key in ("vslider_sw", "vd_l1", "vd_l2", "vd_l3", "vd_l4", "vd_l5"):
+            try:
+                ui.remove_element(key)
+            except Exception:
+                pass
+        if self._face_blanked:
+            try:
+                import pwnagotchi.ui.faces as faces
+                ui.set("face", getattr(faces, "AWAKE", "(^‿^)"))
+            except Exception:
+                pass
 
     # --- persistence -------------------------------------------------------
     def _load_state(self):
