@@ -32,6 +32,10 @@ Versions of the plugins in this repository.
 
 ## pwndex
 
+### 0.6.2
+- Networks **without a password are now listed first** (at the top), so it's
+  obvious which ones still need a password; ones with a password sort below.
+
 ### 0.6.1
 - Records **when a password was saved** (`pw_at`) — used by vslider to sort the
   Cracked list newest-first and show the age.

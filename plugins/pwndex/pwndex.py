@@ -26,7 +26,7 @@ import pwnagotchi.plugins as plugins
 
 class Pwndex(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.1"
+    __version__ = "0.6.2"
     __license__ = "MIT"
     __description__ = "Network pokedex: AP catalog (SSID/vendor/MAC), search, passwords. Web UI."
 
@@ -282,9 +282,12 @@ class Pwndex(plugins.Plugin):
             if request.method == "GET":
                 if action == "data":
                     with self._lock:
+                        # networks WITHOUT a password first (top) so you can see
+                        # which still need one; then caught-first, then by name.
                         src = sorted(
                             self._dex.values(),
-                            key=lambda e: (not e.get("caught"),
+                            key=lambda e: (bool(e.get("pw")),
+                                           not e.get("caught"),
                                            (e.get("ssid") or "￿").lower()))
                         items = []
                         vendors = set()
