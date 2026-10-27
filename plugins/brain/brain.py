@@ -46,7 +46,7 @@ PHRASES = {
 
 class Brain(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.3.0"
+    __version__ = "0.3.1"
     __license__ = "MIT"
     __description__ = "AI agent (bandit): learns and picks scanning channels."
 
@@ -164,15 +164,25 @@ class Brain(plugins.Plugin):
             pass
 
     def _save_settings(self):
+        """Write settings and read them back to confirm they persisted.
+        Returns True only on a verified write."""
         try:
+            os.makedirs(self._dir, exist_ok=True)
+            data = {"hold": self._hold, "hs_reward": self._hs_reward,
+                    "target_reward": self._target_reward,
+                    "currency": self._currency}
             tmp = self._settings_f + ".tmp"
             with open(tmp, "w", encoding="utf-8") as f:
-                json.dump({"hold": self._hold, "hs_reward": self._hs_reward,
-                           "target_reward": self._target_reward,
-                           "currency": self._currency}, f)
+                json.dump(data, f)
+                f.flush()
+                os.fsync(f.fileno())
             os.replace(tmp, self._settings_f)
+            with open(self._settings_f, encoding="utf-8") as f:   # verify
+                back = json.load(f)
+            return int(back.get("hold", -1)) == int(self._hold)
         except Exception:
             logging.exception("[brain] save settings failed")
+            return False
 
     # --- reward collection -------------------------------------------------
     def _reward(self, ch, amount):
@@ -351,8 +361,9 @@ class Brain(plugins.Plugin):
                     self._currency = (str(body["currency"]) or "$")[:3]
             except Exception:
                 return jsonify(ok=False, msg="bad values"), 400
-            self._save_settings()
-            return jsonify(ok=True, settings=self._settings())
+            ok = self._save_settings()
+            return jsonify(ok=ok, settings=self._settings(),
+                           msg="" if ok else "could not write settings.json")
         abort(404)
 
     def _page(self):
@@ -422,7 +433,8 @@ async function load(){
       return '<div class="ch'+(sel.has(c.ch)?' sel':'')+'"><div class="lbl">ch '+c.ch+'</div>'
         +'<div class="bar"><div style="width:'+w+'%"></div></div><div class="v">'+CUR+c.value+'</div></div>';
     }).join("");
-    if(!$("#cfg").open){const s=j.settings||{};
+    window._lastS=j.settings||{};
+    if(!$("#cfg").open){const s=window._lastS;
       $("#s_hold").value=s.hold; $("#s_hs").value=s.hs_reward;
       $("#s_tg").value=s.target_reward; $("#s_cur").value=s.currency;}
   }catch(e){}
@@ -438,5 +450,7 @@ $("#save").addEventListener("click",async()=>{
   catch(e){$("#saved").textContent="error";}
   setTimeout(()=>$("#saved").textContent="",1500);
 });
+$("#cfg").addEventListener("toggle",()=>{if($("#cfg").open&&window._lastS){const s=window._lastS;
+  $("#s_hold").value=s.hold;$("#s_hs").value=s.hs_reward;$("#s_tg").value=s.target_reward;$("#s_cur").value=s.currency;}});
 load(); setInterval(load,4000);
 </script></body></html>"""

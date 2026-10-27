@@ -149,6 +149,12 @@ Versions of the plugins in this repository.
 
 ## brain
 
+### 0.3.1
+- **Settings save is now verified**: after writing `settings.json` it reads the
+  file back, and the web shows "saved ✓" only on a real, persisted write (else
+  "error") — so "saved" can't lie. Opening the ⚙️ panel now also fills the inputs
+  with the current saved values.
+
 ### 0.3.0
 - **English web UI + settings**. The **spoken lines stay Russian** (proper sentences
   with the channel, e.g. "Меняю тактику → канал 11.").
