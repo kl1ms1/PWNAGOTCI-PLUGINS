@@ -68,6 +68,11 @@ Versions of the plugins in this repository.
 
 ## webshell
 
+### 0.1.1
+- Added a **"+ file"** button in the file manager (create a new file, then edit
+  and save it). Creating files already worked from the terminal (`touch`,
+  `echo > file`) — now it's one click in the folders view too.
+
 ### 0.1.0
 - First version: a **web file manager + root terminal** for your own device —
   browse/view/edit/download/delete files, make folders, and run shell commands

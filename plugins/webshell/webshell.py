@@ -31,7 +31,7 @@ import pwnagotchi.plugins as plugins
 
 class Webshell(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.1.0"
+    __version__ = "0.1.1"
     __license__ = "MIT"
     __description__ = "Web file manager + root terminal (your own device only)."
 
@@ -284,6 +284,7 @@ h2{font-size:.95rem;margin:14px 0 4px;color:var(--mut)}
     <button id="up">⬆ вверх</button>
     <input type="text" id="path" placeholder="/root">
     <button class="acc" id="go">Открыть</button>
+    <button id="mkf">+ файл</button>
     <button id="mkd">+ папка</button>
   </div>
   <div class="path" id="curpath"></div>
@@ -349,6 +350,13 @@ $("#path").addEventListener("keydown",e=>{if(e.key==="Enter")ls($("#path").value
 $("#mkd").addEventListener("click",async()=>{
   const n=prompt("имя новой папки:"); if(!n)return;
   const j=await post("mkdir",{path:join(CWD,n)}); if(!j.ok)alert(j.msg||"ошибка"); ls(CWD);
+});
+$("#mkf").addEventListener("click",async()=>{
+  const n=prompt("имя нового файла:"); if(!n)return;
+  const p=join(CWD,n);
+  const j=await post("write",{path:p,content:""});
+  if(!j.ok){alert(j.msg||"ошибка");return;}
+  await ls(CWD); openFile(p);
 });
 
 async function openFile(p){
