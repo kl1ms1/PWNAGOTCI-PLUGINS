@@ -1,0 +1,15 @@
+# webshell config. Copy into /etc/pwnagotchi/config.toml (edit via SSH, not Webcfg).
+
+main.custom_plugins = "/usr/local/share/pwnagotchi/custom-plugins/"
+main.plugins.webshell.enabled = true
+
+# ⚠️ ROOT file access + ROOT terminal over the web. Your OWN device only.
+# Optional access password for THIS plugin (empty = open). Strongly recommended
+# once the device broadcasts its own Wi-Fi:
+# main.plugins.webshell.password = "choose-something"
+
+# Terminal command timeout (seconds) and where the terminal starts:
+# main.plugins.webshell.timeout = 30
+# main.plugins.webshell.start_dir = "/root"
+
+# Open: http://<ip>:8080/plugins/webshell/

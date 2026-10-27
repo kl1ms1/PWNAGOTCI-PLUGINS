@@ -66,6 +66,14 @@ Versions of the plugins in this repository.
 ### 0.1.0
 - Network pokedex + password store + wpa-sec import.
 
+## webshell
+
+### 0.1.0
+- First version: a **web file manager + root terminal** for your own device —
+  browse/view/edit/download/delete files, make folders, and run shell commands
+  (with `cd` remembered). Optional per-plugin `password`; recursive folder
+  deletes are left to the terminal on purpose. ⚠️ ROOT access — own device only.
+
 ## full_save
 
 ### 0.1.0
