@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.0"
+    __version__ = "0.6.1"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -85,6 +85,8 @@ class Vslider(plugins.Plugin):
         self._dex_f = "/root/.pwndex/dex.json"
         self._hs_dir = "/home/pi/handshakes"
         self._potfile = os.path.join(self._hs_dir, "wpa-sec.cracked.potfile")
+        self._uploaded_f = os.path.join(self._dir, "uploaded.json")
+        self._uploaded = set()            # pcap basenames already sent to wpa-sec
         self._conn = {"ssid": "pwn-ap", "pass": "changeme", "web": ""}
         # --- e-ink screen output ---
         self._ui = None
@@ -111,8 +113,12 @@ class Vslider(plugins.Plugin):
         self._wpasec_url = "https://wpa-sec.stanev.org"
         # the pos-2 "search profiles -> upload -> AP" flow
         self._flow_state = "idle"         # idle/search/none/connect/upload/done/error
-        self._flow_lines = []             # big centered lines for the flow screen
+        self._flow_face = ""              # big face (left column) for the flow screen
+        self._flow_text = []              # small caption lines (left column)
+        self._flow_total = 0              # total handshakes (big number, top-right)
+        self._flow_up = 0                 # uploaded so far (live number, bottom-right)
         self._flow_thread = None
+        self._bignum_cache = {}           # (text,w,h)->image, stretched "liquid" digits
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
@@ -137,6 +143,7 @@ class Vslider(plugins.Plugin):
                 pass
         self._load_state()
         self._load_stats()
+        self._load_uploaded()
         logging.info("[vslider] loaded (pos=%d, hs_total=%d)", self._pos, self._hs_total)
 
     def on_ready(self, agent):
@@ -265,9 +272,10 @@ class Vslider(plugins.Plugin):
         out.sort(key=lambda x: x[2], reverse=True)
         return out
 
-    def _flow_set(self, state, lines):
+    def _flow_set(self, state, face, text):
         self._flow_state = state
-        self._flow_lines = lines
+        self._flow_face = face
+        self._flow_text = text or []
 
     def _start_flow(self):
         if self._flow_thread and self._flow_thread.is_alive():
@@ -279,36 +287,38 @@ class Vslider(plugins.Plugin):
 
     def _stop_flow(self):
         if self._flow_state != "idle":
-            self._flow_set("idle", [])
+            self._flow_set("idle", "", [])
         self._ap_down()
 
     def _flow_run(self):
         try:
-            self._flow_set("search", ["(o_o)", "Ищу точки с", "паролями / профилями..."])
+            self._flow_total = self._pcap_count()
+            self._flow_up = 0
+            self._flow_set("search", "(o_o)", ["Ищу сети с", "профилями..."])
             time.sleep(2.5)
             if self._pos != POS_DASH:
                 return
+            # only networks that are BOTH currently visible AND saved in pwndex
             near = self._profiled_nearby()
-            total = self._pcap_count()
             if not near:
-                self._flow_set("none", ["(x_x)", "Нет профилей рядом",
-                                        "закину в другой раз"])
+                self._flow_set("none", "(x_x)", ["Нет профилей", "рядом.",
+                                                 "закину потом"])
                 time.sleep(3)
             else:
                 ssid = near[0][0]
-                self._flow_set("connect", ["(o_o)", "Нашёл: " + ssid, "подключаюсь..."])
+                self._flow_set("connect", "(o_o)", ["Нашёл:", self._clip(ssid, 12),
+                                                    "подключаюсь..."])
                 ok = self._client_connect(ssid, near[0][1]) if self._ap_live else True
                 time.sleep(1 if self._ap_live else 2)
                 if ok:
-                    self._flow_set("upload", ["(>_>)", "Заливаю на wpa-sec..."])
-                    up = self._upload_wpasec() if self._ap_live else total
-                    self._flow_set("done", ["(^_^)", "Всё отлично!",
-                                            "хендшейков: %d" % total,
-                                            "залито: %d" % up])
-                    time.sleep(3)
+                    self._flow_set("upload", "(>_>)", ["Заливаю на", "wpa-sec..."])
+                    self._do_upload()      # bumps self._flow_up live (real in live mode)
+                    self._flow_set("done", "(⌐■_■)", ["Я загрузил,",
+                                                                     "я молодец!"])
+                    time.sleep(4)
                 else:
-                    self._flow_set("error", ["(._.)", "Не подключился",
-                                             "закину в другой раз"])
+                    self._flow_set("error", "(._.)", ["Не подключился.",
+                                                      "закину потом"])
                     time.sleep(3)
                 if self._ap_live:
                     self._client_disconnect()
@@ -317,28 +327,60 @@ class Vslider(plugins.Plugin):
         except Exception:
             logging.exception("[vslider] pos-2 flow failed")
         finally:
-            self._flow_set("idle", [])
+            self._flow_set("idle", "", [])
+
+    def _do_upload(self):
+        """Advance self._flow_up as handshakes upload — a live-counting number.
+        Real wpa-sec POSTs when ap_live=true; a visual count-up in dry-run
+        (which touches NO networking)."""
+        total = self._flow_total
+        if self._ap_live and self._wpasec_key:
+            # bottom number = total uploaded EVER; it ticks up as NEW ones go
+            self._flow_up = len(self._uploaded)
+            self._upload_wpasec(lambda n: setattr(self, "_flow_up", n))
+        else:
+            step = 0.15 if total <= 60 else max(0.02, 6.0 / max(1, total))
+            for i in range(1, total + 1):
+                if self._flow_state != "upload":
+                    break
+                self._flow_up = i
+                time.sleep(step)
 
     # --- live networking (only runs when ap_live=true) ---------------------
-    def _upload_wpasec(self):
+    def _upload_wpasec(self, on_progress=None, budget=180):
+        """Upload only handshakes NOT sent before (tracked in uploaded.json), so
+        re-entering pos 2 is fast and never hangs: skips done files and stops
+        after `budget` seconds (the rest go next time). on_progress gets the
+        running CUMULATIVE count of uploaded files."""
         if not self._wpasec_key:
-            return 0
+            return len(self._uploaded)
         import glob
         try:
             import requests
         except Exception:
-            return 0
-        up = 0
-        for p in glob.glob(os.path.join(self._hs_dir, "*.pcap")):
+            return len(self._uploaded)
+        deadline = time.time() + budget
+        changed = False
+        for p in sorted(glob.glob(os.path.join(self._hs_dir, "*.pcap"))):
+            if self._flow_state not in ("upload", "idle") or time.time() > deadline:
+                break
+            name = os.path.basename(p)
+            if name in self._uploaded:        # already sent — skip (fast)
+                continue
             try:
                 with open(p, "rb") as f:
                     r = requests.post(self._wpasec_url, cookies={"key": self._wpasec_key},
                                       files={"file": f}, timeout=30)
                 if r.status_code in (200, 302):
-                    up += 1
+                    self._uploaded.add(name)
+                    changed = True
+                    if on_progress:
+                        on_progress(len(self._uploaded))
             except Exception:
                 pass
-        return up
+        if changed:
+            self._save_uploaded()
+        return len(self._uploaded)
 
     def _client_connect(self, ssid, pw):
         try:
@@ -543,12 +585,14 @@ class Vslider(plugins.Plugin):
             self._f_val = (getattr(fonts, "BoldSmall", None)
                            or getattr(fonts, "Medium", None)
                            or getattr(fonts, "Bold", None) or self._f_small)
+            self._f_big = (getattr(fonts, "Huge", None)
+                           or getattr(fonts, "Bold", None) or self._f_val)
         except Exception:
             return
         drawer.rectangle((0, 0, W, H), fill=0xFF)       # cover the normal UI
         # while the pos-2 Wi-Fi flow runs, take the whole screen for its status
         if self._flow_state != "idle":
-            self._draw_flow(drawer, W, H)
+            self._draw_flow(canvas, drawer, W, H)
             return
         data = self._eink_refresh()
         self._draw_tabs(drawer, W)
@@ -564,22 +608,66 @@ class Vslider(plugins.Plugin):
         else:
             self._tab_hunt(drawer, W, H, data)
 
-    def _draw_flow(self, drawer, W, H):
-        lines = self._flow_lines or []
-        self._rr(drawer, (2, 2, W - 2, 16), 4, fill=0x00)
+    def _draw_flow(self, canvas, drawer, W, H):
+        # slim header
+        self._rr(drawer, (2, 2, W - 2, 15), 4, fill=0x00)
         t = "Wi-Fi AP" + ("" if self._ap_live else " (проверка)")
         drawer.text(((W - self._tw(drawer, t, self._f_small)) / 2, 3), t,
                     font=self._f_small, fill=0xFF)
-        if not lines:
-            return
-        face = lines[0]
-        drawer.text(((W - self._tw(drawer, face, self._f_val)) / 2, 28),
-                    face, font=self._f_val, fill=0x00)
-        y = 54
-        for ln in lines[1:]:
-            drawer.text(((W - self._tw(drawer, ln, self._f_small)) / 2, y),
-                        ln, font=self._f_small, fill=0x00)
-            y += 15
+        face = self._flow_face or ""
+        text = self._flow_text or []
+        if self._flow_state in ("upload", "done"):
+            # LEFT: big face + caption ; RIGHT: two huge, stretched numbers
+            lx0, lx1 = 4, int(W * 0.46)
+            fw = self._tw(drawer, face, self._f_big)
+            drawer.text((lx0 + (lx1 - lx0 - fw) / 2, 20), face,
+                        font=self._f_big, fill=0x00)
+            y = 60
+            for ln in text:
+                lw = self._tw(drawer, ln, self._f_val)
+                drawer.text((lx0 + (lx1 - lx0 - lw) / 2, y), ln,
+                            font=self._f_val, fill=0x00)
+                y += 16
+            rx0, rx1 = int(W * 0.49), W - 4
+            drawer.text((rx0, 16), "хэши", font=self._f_small, fill=0x00)
+            self._bignum(canvas, drawer, (rx0, 28, rx1, 62), str(self._flow_total))
+            drawer.text((rx0, 66), "залито", font=self._f_small, fill=0x00)
+            self._bignum(canvas, drawer, (rx0, 78, rx1, H - 4), str(self._flow_up))
+        else:
+            # LEFT: big face ; RIGHT: caption lines (bigger text)
+            drawer.text((6, 40), face, font=self._f_big, fill=0x00)
+            y = 28
+            rx = int(W * 0.44)
+            for ln in text:
+                drawer.text((rx, y), ln, font=self._f_val, fill=0x00)
+                y += 20
+
+    def _bignum(self, canvas, drawer, box, text):
+        """Draw a number stretched to fill the box — big 'liquid-glass' digits."""
+        x0, y0, x1, y1 = [int(v) for v in box]
+        bw, bh = max(1, x1 - x0), max(1, y1 - y0)
+        key = (text, bw, bh)
+        img = self._bignum_cache.get(key)
+        if img is None:
+            from PIL import Image, ImageDraw
+            font = self._f_big
+            tw = max(1, int(self._tw(drawer, text, font)))
+            try:
+                asc, desc = font.getmetrics()
+                th = max(1, asc + desc)
+            except Exception:
+                th = 24
+            mode = getattr(canvas, "mode", "1")
+            tmp = Image.new(mode, (tw + 4, th + 2), 0xFF)
+            ImageDraw.Draw(tmp).text((2, 0), text, font=font, fill=0x00)
+            img = tmp.resize((bw, bh))
+            if len(self._bignum_cache) > 64:
+                self._bignum_cache.clear()
+            self._bignum_cache[key] = img
+        try:
+            canvas.paste(img, (x0, y0))
+        except Exception:
+            drawer.text((x0, y0), text, font=self._f_big, fill=0x00)
 
     def _draw_tabs(self, drawer, W):
         names = ["Hunt", "Sys", "Comic", "Keys", "#5"]
@@ -851,6 +939,21 @@ class Vslider(plugins.Plugin):
                 json.dump({"hs_total": self._hs_total, "streak": self._streak,
                            "last_day": self._last_day}, f)
             os.replace(self._stats_f + ".tmp", self._stats_f)
+        except Exception:
+            pass
+
+    def _load_uploaded(self):
+        try:
+            with open(self._uploaded_f, encoding="utf-8") as f:
+                self._uploaded = set(json.load(f) or [])
+        except Exception:
+            self._uploaded = set()
+
+    def _save_uploaded(self):
+        try:
+            with open(self._uploaded_f + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(sorted(self._uploaded), f)
+            os.replace(self._uploaded_f + ".tmp", self._uploaded_f)
         except Exception:
             pass
 

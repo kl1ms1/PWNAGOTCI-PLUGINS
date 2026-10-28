@@ -101,6 +101,23 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.6.1
+- **Redesigned the Wi-Fi flow screen.** Two columns: on the **left** a big face
+  + caption, on the **right** two **huge, stretched "liquid-glass" numbers** —
+  top = total **хэши** (handshakes), bottom = **залито** (uploaded). The uploaded
+  number **counts up live** as each handshake is sent (real wpa-sec POSTs in live
+  mode; a visual count-up in dry-run). The "done" face is now the **sunglasses**
+  `(⌐■_■)` with "Я загрузил, я молодец!".
+- The profile flow still only runs **in Dashboard (pos 2) with `ap_mode`**, and
+  only matches networks that are **currently visible AND saved in pwndex** (it
+  picks the single strongest one — it does not cycle through all your profiles).
+- **Upload won't hang.** It now sends only handshakes **not uploaded before**
+  (remembered in `/root/.vslider/uploaded.json`), so re-entering pos 2 is instant
+  instead of re-POSTing everything, and it stops after a **180 s budget** (the
+  rest go next time). «залито» is the real **cumulative** count sent to wpa-sec.
+  Networking logic (connect over the right ports + upload) is covered by a stubbed
+  test suite; the real radio still has to be tried on the device.
+
 ### 0.6.0
 - **Wi-Fi access-point flow on Dashboard (pos 2), EXPERIMENTAL.** On entering pos 2
   (with `ap_mode`) it runs a full-screen flow: 🔍 search your saved **profiles**

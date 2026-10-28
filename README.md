@@ -56,7 +56,7 @@ Short version with troubleshooting — [`docs/INSTALLING.md`](docs/INSTALLING.md
 | [voice_ru](plugins/voice_ru/) | 1.0.0 | ✅ | pwnagotchi speaks Russian — all phrases translated in memory (updates don't wipe it) |
 | [webshell](plugins/webshell/) | 0.1.1 | ✅ | Web file manager + ROOT terminal for your own device (browse/edit/download/delete + run commands; optional password) |
 | [full_save](plugins/full_save/) | 0.1.0 | ✅ | One good handshake per network: whitelist fully-captured nets, tidy duplicate .pcaps (safe — moves to trash, never leaves the handshakes dir) |
-| [vslider](plugins/vslider/) | 0.6.0 | 🏗️ | Virtual 3-position slider (web + **e-ink**) with a switch animation: Auto / tabbed Dashboard (pauses hunting; Охота·Система·Комикс·Пароли·№5, auto-rotating) / reserved |
+| [vslider](plugins/vslider/) | 0.6.1 | 🏗️ | Virtual 3-position slider (web + **e-ink**) with a switch animation: Auto / tabbed Dashboard (pauses hunting; Охота·Система·Комикс·Пароли·№5, auto-rotating) / reserved |
 
 Version history — in [`CHANGELOG.md`](CHANGELOG.md). Tags/releases — on the repo's **Releases** tab.
 
