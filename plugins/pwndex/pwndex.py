@@ -26,7 +26,7 @@ import pwnagotchi.plugins as plugins
 
 class Pwndex(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.2"
+    __version__ = "0.6.3"
     __license__ = "MIT"
     __description__ = "Network pokedex: AP catalog (SSID/vendor/MAC), search, passwords. Web UI."
 
@@ -65,6 +65,7 @@ class Pwndex(plugins.Plugin):
         self._potfile = os.path.join(self._hs_dir, "wpa-sec.cracked.potfile")
         self._import_potfile()
         self._sync_whitelist()
+        self._save_profiles()
         self._save(force=True)
 
     def on_epoch(self, agent, epoch, epoch_data):
@@ -74,6 +75,28 @@ class Pwndex(plugins.Plugin):
         self._save()
 
     # --- your networks (with a password) -> whitelist, don't attack them --
+    def _save_profiles(self):
+        """Write Wi-Fi profiles (SSID -> password) for every saved-password
+        network to /root/.pwndex/profiles.json, so other plugins (e.g. the
+        auto-connect / upload flow) can use them. All profiles are equal — no
+        priority is stored; the connector picks by signal/availability."""
+        try:
+            path = os.path.join(self._dir, "profiles.json")
+            with self._lock:
+                profs = {}
+                for e in self._dex.values():
+                    ssid, pw = e.get("ssid"), e.get("pw")
+                    if ssid and pw:
+                        profs[ssid] = {"pw": pw, "mac": (e.get("mac") or ""),
+                                       "at": e.get("pw_at", 0)}
+            tmp = path + ".tmp"
+            with open(tmp, "w", encoding="utf-8") as f:
+                json.dump(profs, f)
+            os.replace(tmp, path)
+            logging.info("[pwndex] %d Wi-Fi profile(s) saved", len(profs))
+        except Exception:
+            logging.exception("[pwndex] save profiles")
+
     def _sync_whitelist(self):
         """Add every password-having network (SSID + MAC) to main.whitelist.
 
@@ -354,6 +377,7 @@ class Pwndex(plugins.Plugin):
                     has_pw = bool(e.get("pw"))
                 self._save(force=True)
                 self._sync_whitelist()   # password entered -> network to whitelist
+                self._save_profiles()    # password entered -> Wi-Fi profile for auto-connect
                 # whitelisted = this network now has a password and auto-whitelist is on
                 return jsonify(ok=True, whitelisted=(has_pw and self._auto_wl))
 

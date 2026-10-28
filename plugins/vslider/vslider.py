@@ -97,6 +97,14 @@ class Vslider(plugins.Plugin):
         self._tab_since = 0.0
         self._anim_frames = []            # pending switch-animation frames
         self._recon_state = None          # "on"/"off" — avoid spamming bettercap
+        # --- Wi-Fi access point on Dashboard (pos 2) — EXPERIMENTAL, opt-in ---
+        self._ap_mode = False             # raise own AP while on pos 2
+        self._ap_iface = "wlan0"
+        self._ap_ip = "192.168.50.1"
+        self._ap_on = False               # is the AP currently up?
+        self._ap_procs = []               # [hostapd, dnsmasq] Popen handles
+        self._hostapd_conf = "/tmp/vslider_hostapd.conf"
+        self._dnsmasq_conf = "/tmp/vslider_dnsmasq.conf"
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
@@ -106,6 +114,9 @@ class Vslider(plugins.Plugin):
         self._conn["pass"] = o.get("ap_pass", self._conn["pass"])
         self._conn["web"] = o.get("web", self._conn["web"])
         self._dex_f = o.get("pwndex", self._dex_f)
+        self._ap_mode = bool(o.get("ap_mode", False))
+        self._ap_iface = o.get("ap_iface", self._ap_iface)
+        self._ap_ip = o.get("ap_ip", self._ap_ip)
         self._eink = bool(o.get("eink", True))
         pos = o.get("eink_position")
         if pos:

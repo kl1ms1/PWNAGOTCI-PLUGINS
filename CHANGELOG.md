@@ -32,6 +32,11 @@ Versions of the plugins in this repository.
 
 ## pwndex
 
+### 0.6.3
+- Saving a password now also writes a **Wi-Fi profile** (SSID → password) to
+  `/root/.pwndex/profiles.json`, for the upcoming auto-connect / upload flow.
+  All profiles are equal (no priority stored).
+
 ### 0.6.2
 - Networks **without a password are now listed first** (at the top), so it's
   obvious which ones still need a password; ones with a password sort below.
