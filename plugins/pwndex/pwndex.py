@@ -26,7 +26,7 @@ import pwnagotchi.plugins as plugins
 
 class Pwndex(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.3"
+    __version__ = "0.6.4"
     __license__ = "MIT"
     __description__ = "Network pokedex: AP catalog (SSID/vendor/MAC), search, passwords. Web UI."
 
@@ -305,12 +305,11 @@ class Pwndex(plugins.Plugin):
             if request.method == "GET":
                 if action == "data":
                     with self._lock:
-                        # networks WITHOUT a password first (top) so you can see
-                        # which still need one; then caught-first, then by name.
+                        # neutral order (caught-first, then name); the web UI
+                        # lets you choose where password-having nets go.
                         src = sorted(
                             self._dex.values(),
-                            key=lambda e: (bool(e.get("pw")),
-                                           not e.get("caught"),
+                            key=lambda e: (not e.get("caught"),
                                            (e.get("ssid") or "￿").lower()))
                         items = []
                         vendors = set()
@@ -457,7 +456,12 @@ border-radius:8px;padding:7px 12px;font-size:.85rem;text-decoration:none}
   <button class="chip" data-f="caught">🏆 Caught</button>
   <button class="chip" data-f="pw">🔑 With password</button>
   <button class="chip" data-f="seen">👁 Seen only</button>
-</div></div>
+</div>
+<select id="sort" title="порядок сетей с паролем" style="margin-left:auto;background:#0b0f14;color:var(--fg);border:1px solid var(--line);border-radius:9px;padding:7px 10px;font-size:.85rem">
+  <option value="nopw">Без пароля сверху</option>
+  <option value="pw">С паролем сверху</option>
+  <option value="mixed">Как есть (вразброс)</option>
+</select></div>
 <div class="bar">
   <button class="btn" id="rescan">↻ Refresh from wpa-sec</button>
   <a class="btn" id="export" href="/plugins/pwndex/?action=export">⬇ Export passwords (.txt)</a>
@@ -469,6 +473,7 @@ border-radius:8px;padding:7px 12px;font-size:.85rem;text-decoration:none}
 const BASE="/plugins/pwndex/", CSRF="__CSRF__";
 const $=s=>document.querySelector(s);
 let ALL=[], filter="all", q="", vendorFilter="";
+let sortMode=(function(){try{return localStorage.getItem("pwndex_sort")||"nopw";}catch(e){return "nopw";}})();
 
 function esc(s){return (s||"").replace(/[&<>"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c]));}
 function fmtAge(t){if(!t)return"";const d=Date.now()/1000-t;
@@ -491,8 +496,13 @@ function match(e){
   if(q){const s=(e.ssid+" "+e.vendor+" "+e.mac).toLowerCase();if(!s.includes(q))return false;}
   return true;
 }
+function sortItems(items){
+  if(sortMode==="mixed")return items;                 // server order (caught/name)
+  const g=e=> sortMode==="pw" ? (e.pw?0:1) : (e.pw?1:0);  // stable: keeps order within group
+  return items.slice().sort((a,b)=>g(a)-g(b));
+}
 function render(){
-  const items=ALL.filter(match);
+  const items=sortItems(ALL.filter(match));
   if(!items.length){$("#list").innerHTML='<div class="empty">Nothing here. Catch some networks or change the filter.</div>';return;}
   $("#list").innerHTML=items.map(row).join("");
 }
@@ -537,6 +547,9 @@ async function save(btn){
   catch(e){btn.textContent="✗";if(st)st.textContent="network error";setTimeout(()=>btn.textContent="💾",1200);}
 }
 $("#q").addEventListener("input",()=>{q=$("#q").value.toLowerCase().trim();render();});
+$("#sort").value=sortMode;
+$("#sort").addEventListener("change",()=>{sortMode=$("#sort").value;
+  try{localStorage.setItem("pwndex_sort",sortMode);}catch(e){}render();});
 document.querySelectorAll("#filters .chip").forEach(c=>c.addEventListener("click",()=>{
   document.querySelectorAll("#filters .chip").forEach(x=>x.classList.remove("on"));
   c.classList.add("on");filter=c.dataset.f;render();}));

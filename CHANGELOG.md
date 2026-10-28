@@ -32,6 +32,11 @@ Versions of the plugins in this repository.
 
 ## pwndex
 
+### 0.6.4
+- The list order is now **configurable** via a dropdown: "no-password first",
+  "with-password first", or "as-is" (caught-first / by name). Choice is
+  remembered in the browser. (Server sort is neutral again.)
+
 ### 0.6.3
 - Saving a password now also writes a **Wi-Fi profile** (SSID → password) to
   `/root/.pwndex/profiles.json`, for the upcoming auto-connect / upload flow.
