@@ -101,6 +101,18 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.6.0
+- **Wi-Fi access-point flow on Dashboard (pos 2), EXPERIMENTAL.** On entering pos 2
+  (with `ap_mode`) it runs a full-screen flow: 🔍 search your saved **profiles**
+  among nearby networks → if none, a sad face + "закину в другой раз" → if found,
+  connect to the strongest one, **upload handshakes to wpa-sec**, show
+  "хендшейков X / залито Y", then raise the device's **own AP** (hostapd+dnsmasq).
+  Leaving pos 2 (or any failure) auto-restores hunting.
+- **Safe by default:** `ap_live=false` is a **dry-run** — it shows the whole flow
+  and detects your profiled networks, but changes NO networking. Set
+  `ap_live=true` (hostapd + wpa-sec key required) to go live. All profiles are
+  equal; the nearest/strongest is chosen.
+
 ### 0.5.3
 - More **trend graphs** on the e-ink System page (sub-page 2): sparklines for
   Load, Nearby networks and Hash/min, sampled over time (not just temp/CPU/RAM).

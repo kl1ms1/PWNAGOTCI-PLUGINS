@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.5.3"
+    __version__ = "0.6.0"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -105,6 +105,14 @@ class Vslider(plugins.Plugin):
         self._ap_procs = []               # [hostapd, dnsmasq] Popen handles
         self._hostapd_conf = "/tmp/vslider_hostapd.conf"
         self._dnsmasq_conf = "/tmp/vslider_dnsmasq.conf"
+        self._ap_live = False             # actually touch networking (else dry-run)
+        self._profiles_f = "/root/.pwndex/profiles.json"
+        self._wpasec_key = ""
+        self._wpasec_url = "https://wpa-sec.stanev.org"
+        # the pos-2 "search profiles -> upload -> AP" flow
+        self._flow_state = "idle"         # idle/search/none/connect/upload/done/error
+        self._flow_lines = []             # big centered lines for the flow screen
+        self._flow_thread = None
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
@@ -115,8 +123,10 @@ class Vslider(plugins.Plugin):
         self._conn["web"] = o.get("web", self._conn["web"])
         self._dex_f = o.get("pwndex", self._dex_f)
         self._ap_mode = bool(o.get("ap_mode", False))
+        self._ap_live = bool(o.get("ap_live", False))   # false = dry-run (safe)
         self._ap_iface = o.get("ap_iface", self._ap_iface)
         self._ap_ip = o.get("ap_ip", self._ap_ip)
+        self._profiles_f = o.get("profiles", self._profiles_f)
         self._eink = bool(o.get("eink", True))
         pos = o.get("eink_position")
         if pos:
@@ -137,6 +147,9 @@ class Vslider(plugins.Plugin):
             self._potfile = os.path.join(self._hs_dir, "wpa-sec.cracked.potfile")
             if not self._conn["web"]:
                 self._conn["web"] = "http://10.0.0.2:8080"
+            ws = (cfg.get("main", {}).get("plugins", {}).get("wpa-sec", {}) or {})
+            self._wpasec_key = ws.get("api_key", "") or ""
+            self._wpasec_url = ws.get("api_url", self._wpasec_url) or self._wpasec_url
         except Exception:
             pass
         self._apply()
@@ -144,9 +157,15 @@ class Vslider(plugins.Plugin):
     def on_epoch(self, agent, epoch, epoch_data):
         self._agent = agent
         self._sample_sys()
-        # keep recon in the right state every epoch: OFF only on Dashboard,
-        # ON otherwise — so switching back to Auto reliably RESUMES hunting.
-        self._set_recon(self._pos != POS_DASH)
+        # AP mode: run/keep the pos-2 flow while on Dashboard, tear down when away.
+        if self._ap_mode:
+            if self._pos == POS_DASH:
+                self._start_flow()
+            else:
+                self._stop_flow()
+        # keep recon in the right state (unless the AP flow owns the radio).
+        if not (self._ap_mode and self._pos == POS_DASH):
+            self._set_recon(self._pos != POS_DASH)
 
     def on_handshake(self, agent, filename, access_point, client_station):
         self._hs_total += 1
@@ -196,8 +215,14 @@ class Vslider(plugins.Plugin):
             logging.debug("[vslider] run failed: %s", cmd)
 
     def _apply(self):
-        # Dashboard pauses hunting; Auto (and reserved pos 3) hunt normally.
-        self._set_recon(self._pos != POS_DASH)
+        # Dashboard (pos 2) with ap_mode runs the Wi-Fi flow; otherwise just
+        # pause/resume hunting as before.
+        if self._ap_mode and self._pos == POS_DASH:
+            self._set_recon(False)
+            self._start_flow()
+        else:
+            self._stop_flow()
+            self._set_recon(self._pos != POS_DASH)
 
     def _set_recon(self, on):
         """Turn wifi recon on/off, but only issue the command on a real change
@@ -206,6 +231,206 @@ class Vslider(plugins.Plugin):
         if self._recon_state != want:
             self._run("wifi.recon " + want)
             self._recon_state = want
+
+    # --- pos-2 Wi-Fi flow: profiles -> upload -> own AP --------------------
+    # EXPERIMENTAL. Default is a DRY-RUN (ap_live=false): it shows the whole
+    # on-screen flow and detects your profiled networks, but touches NO
+    # networking. Set ap_live=true (test with a reboot handy) to go live.
+    def _sh(self, args, timeout=20):
+        import subprocess
+        try:
+            r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+            return r.returncode, (r.stdout or "") + (r.stderr or "")
+        except Exception as e:
+            logging.warning("[vslider] cmd %s: %s", args, e)
+            return 1, str(e)
+
+    def _profiles(self):
+        try:
+            with open(self._profiles_f, encoding="utf-8") as f:
+                return json.load(f) or {}
+        except Exception:
+            return {}
+
+    def _profiled_nearby(self):
+        """Profiled networks that are nearby, strongest first (all equal)."""
+        profs = self._profiles()
+        if not profs:
+            return []
+        out = []
+        for ap in self._nearby:
+            ssid = ap.get("ssid") or ""
+            if ssid and ssid in profs:
+                out.append((ssid, profs[ssid].get("pw", ""), ap.get("rssi", -99)))
+        out.sort(key=lambda x: x[2], reverse=True)
+        return out
+
+    def _flow_set(self, state, lines):
+        self._flow_state = state
+        self._flow_lines = lines
+
+    def _start_flow(self):
+        if self._flow_thread and self._flow_thread.is_alive():
+            return
+        if self._flow_state == "idle":
+            import threading
+            self._flow_thread = threading.Thread(target=self._flow_run, daemon=True)
+            self._flow_thread.start()
+
+    def _stop_flow(self):
+        if self._flow_state != "idle":
+            self._flow_set("idle", [])
+        self._ap_down()
+
+    def _flow_run(self):
+        try:
+            self._flow_set("search", ["(o_o)", "Ищу точки с", "паролями / профилями..."])
+            time.sleep(2.5)
+            if self._pos != POS_DASH:
+                return
+            near = self._profiled_nearby()
+            total = self._pcap_count()
+            if not near:
+                self._flow_set("none", ["(x_x)", "Нет профилей рядом",
+                                        "закину в другой раз"])
+                time.sleep(3)
+            else:
+                ssid = near[0][0]
+                self._flow_set("connect", ["(o_o)", "Нашёл: " + ssid, "подключаюсь..."])
+                ok = self._client_connect(ssid, near[0][1]) if self._ap_live else True
+                time.sleep(1 if self._ap_live else 2)
+                if ok:
+                    self._flow_set("upload", ["(>_>)", "Заливаю на wpa-sec..."])
+                    up = self._upload_wpasec() if self._ap_live else total
+                    self._flow_set("done", ["(^_^)", "Всё отлично!",
+                                            "хендшейков: %d" % total,
+                                            "залито: %d" % up])
+                    time.sleep(3)
+                else:
+                    self._flow_set("error", ["(._.)", "Не подключился",
+                                             "закину в другой раз"])
+                    time.sleep(3)
+                if self._ap_live:
+                    self._client_disconnect()
+            if self._pos == POS_DASH and self._ap_live:
+                self._ap_up()
+        except Exception:
+            logging.exception("[vslider] pos-2 flow failed")
+        finally:
+            self._flow_set("idle", [])
+
+    # --- live networking (only runs when ap_live=true) ---------------------
+    def _upload_wpasec(self):
+        if not self._wpasec_key:
+            return 0
+        import glob
+        try:
+            import requests
+        except Exception:
+            return 0
+        up = 0
+        for p in glob.glob(os.path.join(self._hs_dir, "*.pcap")):
+            try:
+                with open(p, "rb") as f:
+                    r = requests.post(self._wpasec_url, cookies={"key": self._wpasec_key},
+                                      files={"file": f}, timeout=30)
+                if r.status_code in (200, 302):
+                    up += 1
+            except Exception:
+                pass
+        return up
+
+    def _client_connect(self, ssid, pw):
+        try:
+            self._sh(["/usr/bin/monstop"])
+            self._sh(["rfkill", "unblock", "wifi"])
+            self._sh(["ip", "link", "set", self._ap_iface, "up"])
+            conf = "/tmp/vslider_wpa.conf"
+            with open(conf, "w") as f:
+                f.write('ctrl_interface=/run/wpa_supplicant\nnetwork={\n'
+                        '    ssid="%s"\n    psk="%s"\n}\n' % (ssid, pw))
+            self._sh(["pkill", "-f", "wpa_supplicant.*" + self._ap_iface])
+            import subprocess
+            subprocess.Popen(["wpa_supplicant", "-B", "-i", self._ap_iface,
+                              "-D", "nl80211", "-c", conf],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(7)
+            rc, _ = self._sh(["dhclient", "-1", "-timeout", "20", self._ap_iface], timeout=25)
+            if rc != 0:
+                self._sh(["udhcpc", "-i", self._ap_iface, "-n", "-q", "-t", "5"], timeout=25)
+            _, out = self._sh(["ip", "-4", "addr", "show", self._ap_iface])
+            return "inet " in out
+        except Exception:
+            logging.exception("[vslider] client connect")
+            return False
+
+    def _client_disconnect(self):
+        self._sh(["pkill", "-f", "wpa_supplicant.*" + self._ap_iface])
+        self._sh(["pkill", "-f", "dhclient.*" + self._ap_iface])
+        self._sh(["ip", "addr", "flush", "dev", self._ap_iface])
+        self._sh(["ip", "link", "set", self._ap_iface, "down"])
+
+    def _ap_up(self):
+        if self._ap_on or not self._ap_live:
+            return
+        iface, ip = self._ap_iface, self._ap_ip
+        ssid = self._conn.get("ssid") or "pwn-ap"
+        pw = self._conn.get("pass") or "changeme"
+        if len(pw) < 8:
+            logging.warning("[vslider] AP password <8 chars — not raising AP")
+            return
+        try:
+            import subprocess
+            self._sh(["/usr/bin/monstop"])
+            self._sh(["rfkill", "unblock", "wifi"])
+            self._sh(["ip", "link", "set", iface, "down"])
+            self._sh(["ip", "addr", "flush", "dev", iface])
+            self._sh(["ip", "addr", "add", ip + "/24", "dev", iface])
+            self._sh(["ip", "link", "set", iface, "up"])
+            net = ip.rsplit(".", 1)[0]
+            with open(self._hostapd_conf, "w") as f:
+                f.write("interface=%s\ndriver=nl80211\nssid=%s\nhw_mode=g\nchannel=6\n"
+                        "auth_algs=1\nwpa=2\nwpa_passphrase=%s\nwpa_key_mgmt=WPA-PSK\n"
+                        "rsn_pairwise=CCMP\nignore_broadcast_ssid=0\n" % (iface, ssid, pw))
+            with open(self._dnsmasq_conf, "w") as f:
+                f.write("interface=%s\nbind-interfaces\nexcept-interface=lo\n"
+                        "dhcp-range=%s.10,%s.100,255.255.255.0,12h\n"
+                        "dhcp-option=3,%s\ndhcp-option=6,%s\nno-resolv\nport=0\n"
+                        % (iface, net, net, ip, ip))
+            hp = subprocess.Popen(["hostapd", self._hostapd_conf],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.5)
+            dm = subprocess.Popen(["dnsmasq", "-C", self._dnsmasq_conf, "-k"],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._ap_procs = [hp, dm]
+            self._ap_on = True
+            logging.info("[vslider] AP up: %s @ %s", ssid, ip)
+        except Exception:
+            logging.exception("[vslider] AP up failed — restoring hunt")
+            self._ap_down()
+
+    def _ap_down(self):
+        if not self._ap_on and not self._ap_procs:
+            return
+        for p in self._ap_procs:
+            try:
+                p.terminate()
+                try:
+                    p.wait(timeout=3)
+                except Exception:
+                    p.kill()
+            except Exception:
+                pass
+        self._ap_procs = []
+        self._sh(["pkill", "-f", self._hostapd_conf])
+        self._sh(["pkill", "-f", self._dnsmasq_conf])
+        self._sh(["ip", "addr", "flush", "dev", self._ap_iface])
+        self._sh(["ip", "link", "set", self._ap_iface, "down"])
+        self._sh(["/usr/bin/monstart"])        # bring hunting back
+        self._ap_on = False
+        self._recon_state = None
+        self._set_recon(self._pos != POS_DASH)
+        logging.info("[vslider] AP down, hunt restored")
 
     # --- e-ink screen output ----------------------------------------------
     _NAMES = {POS_AUTO: "Auto", POS_DASH: "Dash", POS_X: "Sync"}
@@ -267,6 +492,10 @@ class Vslider(plugins.Plugin):
 
     def on_unload(self, ui):
         try:
+            self._stop_flow()          # tear down AP + restore hunting if live
+        except Exception:
+            pass
+        try:
             ui.remove_element("vdash")
         except Exception:
             pass
@@ -317,6 +546,10 @@ class Vslider(plugins.Plugin):
         except Exception:
             return
         drawer.rectangle((0, 0, W, H), fill=0xFF)       # cover the normal UI
+        # while the pos-2 Wi-Fi flow runs, take the whole screen for its status
+        if self._flow_state != "idle":
+            self._draw_flow(drawer, W, H)
+            return
         data = self._eink_refresh()
         self._draw_tabs(drawer, W)
         t = self._tab_idx
@@ -330,6 +563,23 @@ class Vslider(plugins.Plugin):
             self._tab_five(drawer, W, H)
         else:
             self._tab_hunt(drawer, W, H, data)
+
+    def _draw_flow(self, drawer, W, H):
+        lines = self._flow_lines or []
+        self._rr(drawer, (2, 2, W - 2, 16), 4, fill=0x00)
+        t = "Wi-Fi AP" + ("" if self._ap_live else " (проверка)")
+        drawer.text(((W - self._tw(drawer, t, self._f_small)) / 2, 3), t,
+                    font=self._f_small, fill=0xFF)
+        if not lines:
+            return
+        face = lines[0]
+        drawer.text(((W - self._tw(drawer, face, self._f_val)) / 2, 28),
+                    face, font=self._f_val, fill=0x00)
+        y = 54
+        for ln in lines[1:]:
+            drawer.text(((W - self._tw(drawer, ln, self._f_small)) / 2, y),
+                        ln, font=self._f_small, fill=0x00)
+            y += 15
 
     def _draw_tabs(self, drawer, W):
         names = ["Hunt", "Sys", "Comic", "Keys", "#5"]

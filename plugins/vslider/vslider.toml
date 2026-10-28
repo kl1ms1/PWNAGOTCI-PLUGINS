@@ -17,7 +17,16 @@ main.plugins.vslider.enabled = true
 # Where pwndex stores its catalog (for the passwords tab):
 # main.plugins.vslider.pwndex = "/root/.pwndex/dex.json"
 
-# e-ink screen: show the mode slider ([#··]Auto / [·#·]Dash / [··#]Sync) on the
-# device screen, with a knob-slide on switch. Move it if it overlaps other text.
+# e-ink screen: full-screen dashboard in Dashboard mode (Hunt/Sys/Comic/Keys/#5).
 # main.plugins.vslider.eink = true
-# main.plugins.vslider.eink_position = "92,0"   # x,y on the 250x122 screen
+
+# --- Wi-Fi access point flow on Dashboard (pos 2) — EXPERIMENTAL ---
+# ap_mode: run the pos-2 flow (search profiles -> upload to wpa-sec -> own AP).
+# ap_live: false = DRY-RUN (shows the on-screen flow + finds your profiled
+#          networks, but touches NO networking — safe to try). true = go LIVE
+#          (needs hostapd installed + a wpa-sec api_key; test with a reboot handy).
+# main.plugins.vslider.ap_mode = true
+# main.plugins.vslider.ap_live = false
+# main.plugins.vslider.ap_ip   = "192.168.50.1"
+# main.plugins.vslider.ap_iface = "wlan0"
+# main.plugins.vslider.profiles = "/root/.pwndex/profiles.json"
