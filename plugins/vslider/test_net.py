@@ -55,6 +55,8 @@ def mk():
     v=vslider.Vslider()
     v._dir=tempfile.mkdtemp()
     v._uploaded_f=os.path.join(v._dir,"uploaded.json")
+    v._sync_f=os.path.join(v._dir,"sync.json")
+    v._sync_seen_f=os.path.join(v._dir,"sync_seen.json")
     v._hs_dir=hs
     v._wpasec_key="TESTKEY"
     v._ap_live=True
@@ -114,5 +116,64 @@ print("   flow_done:", v3._flow_done, " end state:", v3._flow_state, " (expect i
 print("   logical sleep budget: %.1fs (real wall: %.2fs — never blocked)"%(slept[0],wall))
 assert wall < 2.0, "flow must not actually block"
 assert v3._flow_done and v3._flow_state=="idle", "after success: dashboard, no re-loop"
+
+print("== 7. _sync_result_face: each result maps to the right face ==")
+f_ok,_=vslider.Vslider._sync_result_face("ok",6,6)
+f_np,_=vslider.Vslider._sync_result_face("no_profile",0,6)
+f_ni,_=vslider.Vslider._sync_result_face("no_iface",0,6)
+f_nn,_=vslider.Vslider._sync_result_face("no_net",0,6)
+f_part,t_part=vslider.Vslider._sync_result_face("ok",3,6)
+print("   ok:",f_ok," no_profile:",f_np," no_iface:",f_ni," no_net:",f_nn," partial:",f_part,t_part)
+assert f_ok=="(^o^)" and f_np=="(x_x)" and f_ni=="(x_x)" and f_nn=="(T_T)"
+assert f_part=="(^_^)" and "3" in t_part[1] and "6" in t_part[1]
+
+print("== 8. _launch_sync: writes 'start' sync.json, shows 'launch', guards double-run ==")
+v4=mk()
+script=os.path.join(v4._dir,"pwn-sync.sh"); open(script,"w").write("#!/bin/bash\n")
+v4._sync_script=script
+ok,msg=v4._launch_sync()
+import json as _j2
+s=_j2.load(open(v4._sync_f))
+print("   ok:",ok," state file:",s.get("state")," flow:",v4._flow_state," msg:",msg[:40])
+assert ok and s.get("state")=="start" and v4._flow_state=="launch"
+ok2,msg2=v4._launch_sync()        # already running (not finished, fresh ts)
+print("   second call blocked:",(not ok2),"->",msg2[:40])
+assert not ok2
+
+print("== 9. _replay_sync: animates up to sent_total, ends on dashboard ==")
+v5=mk()
+calls=[]
+_orig_set=v5._flow_set
+def _rec_set(state,face,text): calls.append((state,face)); _orig_set(state,face,text)
+v5._flow_set=_rec_set
+run={"total":6,"up":4,"sent_total":6,"names":["A","B","C","D","E","F"],
+     "result":"ok","finished":True,"fin_ts":int(_time.time())}
+t0=_time.time(); v5._replay_sync(run); wall=_time.time()-t0
+states=[c[0] for c in calls]
+print("   states:",states," final up:",v5._flow_up," flow_done:",v5._flow_done," wall %.2fs"%wall)
+assert states[0]=="replay" and ("done" in states) and states[-1]=="idle"
+assert v5._flow_done and v5._flow_state=="idle" and wall<2.0
+# the 'done' frame carried the happy face
+assert any(st=="done" and fc=="(^o^)" for st,fc in calls)
+
+print("== 10. _maybe_replay_sync: fires once for a fresh finished run, then quiet ==")
+v6=mk()
+_j2.dump({"total":3,"up":3,"sent_total":3,"names":["X","Y","Z"],
+          "result":"ok","finished":True,"fin_ts":int(_time.time())}, open(v6._sync_f,"w"))
+v6._maybe_replay_sync()
+th=v6._flow_thread
+if th: th.join(timeout=5)
+print("   seen_ts set:",v6._sync_seen_ts>0," ended:",v6._flow_state)
+assert v6._sync_seen_ts>0
+before=v6._sync_seen_ts
+v6._maybe_replay_sync()           # same run again -> nothing
+assert v6._sync_seen_ts==before and (v6._flow_thread is th)
+# a too-old finished run is remembered silently (no replay)
+v7=mk()
+_j2.dump({"total":2,"up":2,"sent_total":2,"result":"ok","finished":True,
+          "fin_ts":int(_time.time())-5000}, open(v7._sync_f,"w"))
+v7._maybe_replay_sync()
+print("   old run: seen_ts set:",v7._sync_seen_ts>0," no replay thread:",v7._flow_thread is None)
+assert v7._sync_seen_ts>0 and v7._flow_thread is None
 
 print("\nALL NETWORK-LOGIC TESTS PASSED")

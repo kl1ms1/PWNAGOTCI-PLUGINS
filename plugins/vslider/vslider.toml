@@ -20,6 +20,17 @@ main.plugins.vslider.enabled = true
 # e-ink screen: full-screen dashboard in Dashboard mode (Hunt/Sys/Comic/Keys/#5).
 # main.plugins.vslider.eink = true
 
+# --- Field upload (the device uploads itself, no PC/phone/BT) ---
+# On Dashboard (pos 2) there's an "⬆️ Залить на wpa-sec" button. It launches
+# tools/pwn-sync.sh (copy it to the device) which fully stops pwnagotchi, borrows
+# the single radio, connects to one of your saved pwndex profiles, uploads all
+# handshakes to wpa-sec, downloads the cracked list, then restarts hunting. When
+# pwnagotchi comes back, vslider replays the growing-number animation on the real
+# counts and shows "Ура! загрузились!". Needs: a wpa-sec api_key, a saved pwndex
+# profile in range, and systemd-run (ships with systemd). Copy the script once:
+#   scp tools/pwn-sync.sh pi@10.0.0.2:/home/pi/pwn-sync.sh
+# main.plugins.vslider.sync_script = "/home/pi/pwn-sync.sh"
+
 # --- Wi-Fi access point flow on Dashboard (pos 2) — EXPERIMENTAL ---
 # ap_mode: run the pos-2 flow (search profiles -> upload to wpa-sec -> own AP).
 # ap_live: false = DRY-RUN (shows the on-screen flow + finds your profiled

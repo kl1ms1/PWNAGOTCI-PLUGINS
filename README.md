@@ -59,7 +59,7 @@ Device acting up (`APS 0`, crashes, `bus is down`, wiped config)? — [`docs/TRO
 | [wpasync](plugins/wpasync/) | 0.1.0 | 🏗️ | "Upload to wpa-sec NOW" web button — forces the built-in wpa-sec plugin to upload handshakes + download cracked results on demand (checks internet first) |
 | [webshell](plugins/webshell/) | 0.1.1 | ✅ | Web file manager + ROOT terminal for your own device (browse/edit/download/delete + run commands; optional password) |
 | [full_save](plugins/full_save/) | 0.1.0 | ✅ | One good handshake per network: whitelist fully-captured nets, tidy duplicate .pcaps (safe — moves to trash, never leaves the handshakes dir) |
-| [vslider](plugins/vslider/) | 0.6.7 | 🏗️ | Virtual 3-position slider (web + **e-ink**) with a switch animation: Auto / tabbed Dashboard (pauses hunting; Охота·Система·Комикс·Пароли·№5, auto-rotating) / reserved |
+| [vslider](plugins/vslider/) | 0.7.0 | 🏗️ | Virtual 3-position slider (web + **e-ink**) with a switch animation: Auto / tabbed Dashboard (pauses hunting; Охота·Система·Комикс·Пароли·№5, auto-rotating) / reserved. Dashboard has a **field-upload** button: device connects to a saved profile, uploads to wpa-sec itself (no PC/phone/BT), then replays a growing-number animation |
 
 Version history — in [`CHANGELOG.md`](CHANGELOG.md). Tags/releases — on the repo's **Releases** tab.
 

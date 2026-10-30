@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.7"
+    __version__ = "0.7.0"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -122,6 +122,15 @@ class Vslider(plugins.Plugin):
         self._flow_thread = None
         self._flow_done = False           # flow finished OK -> don't loop it
         self._bignum_cache = {}           # (text,w,h)->image, stretched "liquid" digits
+        # --- field upload via pwn-sync.sh (the device uploads itself) ---------
+        # vslider launches the script with systemd-run (so stopping pwnagotchi
+        # won't kill it); when pwnagotchi comes back we read this progress file
+        # and REPLAY the growing-number animation on the real counts.
+        self._sync_script = "/home/pi/pwn-sync.sh"
+        self._sync_f = os.path.join(self._dir, "sync.json")
+        self._sync_seen_f = os.path.join(self._dir, "sync_seen.json")
+        self._sync_seen_ts = 0            # fin_ts of the last run we already showed
+        self._sync_msg = "Готов. Жми «Залить», когда рядом твоя сеть."
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
@@ -137,6 +146,7 @@ class Vslider(plugins.Plugin):
         self._ap_iface = o.get("ap_iface", self._ap_iface)
         self._ap_ip = o.get("ap_ip", self._ap_ip)
         self._profiles_f = o.get("profiles", self._profiles_f)
+        self._sync_script = o.get("sync_script", self._sync_script)
         self._eink = bool(o.get("eink", True))
         pos = o.get("eink_position")
         if pos:
@@ -148,6 +158,7 @@ class Vslider(plugins.Plugin):
         self._load_state()
         self._load_stats()
         self._load_uploaded()
+        self._load_sync_seen()
         logging.info("[vslider] loaded (pos=%d, hs_total=%d)", self._pos, self._hs_total)
 
     def on_ready(self, agent):
@@ -168,6 +179,8 @@ class Vslider(plugins.Plugin):
     def on_epoch(self, agent, epoch, epoch_data):
         self._agent = agent
         self._sample_sys()
+        # if a field-sync (pwn-sync.sh) just finished, replay its animation
+        self._maybe_replay_sync()
         # AP mode: run/keep the pos-2 flow while on Dashboard, tear down when away.
         if self._ap_mode:
             if self._pos == POS_DASH:
@@ -301,6 +314,145 @@ class Vslider(plugins.Plugin):
         if self._flow_state != "idle":
             self._flow_set("idle", "", [])
         self._ap_down()
+
+    # --- field upload (pwn-sync.sh): launch + replay ----------------------
+    def _read_sync(self):
+        try:
+            with open(self._sync_f, encoding="utf-8") as f:
+                return json.load(f) or {}
+        except Exception:
+            return {}
+
+    def _write_sync(self, d):
+        try:
+            with open(self._sync_f + ".tmp", "w", encoding="utf-8") as f:
+                json.dump(d, f)
+            os.replace(self._sync_f + ".tmp", self._sync_f)
+        except Exception:
+            pass
+
+    def _load_sync_seen(self):
+        try:
+            with open(self._sync_seen_f, encoding="utf-8") as f:
+                self._sync_seen_ts = int(json.load(f).get("fin_ts", 0))
+        except Exception:
+            self._sync_seen_ts = 0
+
+    def _save_sync_seen(self):
+        try:
+            with open(self._sync_seen_f + ".tmp", "w", encoding="utf-8") as f:
+                json.dump({"fin_ts": self._sync_seen_ts}, f)
+            os.replace(self._sync_seen_f + ".tmp", self._sync_seen_f)
+        except Exception:
+            pass
+
+    def _launch_sync(self):
+        """Fire pwn-sync.sh detached (systemd-run) so stopping pwnagotchi during
+        the upload doesn't kill it. Returns (ok, message)."""
+        import subprocess
+        s = self._read_sync()
+        if s and not s.get("finished") and (time.time() - s.get("ts", 0) < 300):
+            return False, "Заливка уже идёт — подожди, девайс перезапустится."
+        if not os.path.exists(self._sync_script):
+            return (False, "Нет скрипта %s. Скопируй pwn-sync.sh туда "
+                           "(scp pwn-sync.sh pi@<ip>:%s)." % (self._sync_script,
+                                                              self._sync_script))
+        # pre-write a 'start' state so even the frozen e-ink frame shows progress
+        self._write_sync({"ts": int(time.time()), "state": "start", "result": "",
+                          "total": self._pcap_count(), "up": 0, "already": 0,
+                          "sent_total": 0, "cur": "", "net": "", "names": [],
+                          "cracked": 0, "finished": False, "fin_ts": 0})
+        if self._pos == POS_DASH:          # show "launching" on the e-ink now
+            self._flow_done = False
+            self._flow_total = self._pcap_count()
+            self._flow_up = 0
+            self._flow_cur = ""
+            self._flow_set("launch", "(o_o)", ["Заливаю!", "жди ~минуту,",
+                                               "я перезапущусь"])
+        unit = "pwn-sync-%d" % int(time.time())
+        try:
+            subprocess.Popen(["systemd-run", "--collect", "--unit", unit,
+                              "/bin/bash", self._sync_script],
+                             stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except FileNotFoundError:
+            return False, "Нет systemd-run на девайсе — не могу запустить фоном."
+        except Exception as e:
+            logging.exception("[vslider] launch sync")
+            return False, "Не смог запустить: %s" % e
+        logging.info("[vslider] field sync launched (%s)", unit)
+        return True, "Запустил заливку. Девайс сам перезапустится и покажет результат на экране."
+
+    def _maybe_replay_sync(self):
+        """After pwn-sync.sh finishes (and pwnagotchi restarts), replay the
+        growing-number animation on the real counts — once per run."""
+        if self._flow_state != "idle":
+            return                          # don't interrupt a running flow
+        if self._flow_thread and self._flow_thread.is_alive():
+            return
+        s = self._read_sync()
+        if not s or not s.get("finished"):
+            return
+        fin = int(s.get("fin_ts") or s.get("ts") or 0)
+        if fin <= self._sync_seen_ts:
+            return                          # already shown
+        if time.time() - fin > 600:         # too old -> just remember, no replay
+            self._sync_seen_ts = fin
+            self._save_sync_seen()
+            return
+        if self._pos != POS_DASH or not self._eink:
+            return                          # wait until we're on the dashboard
+        self._sync_seen_ts = fin
+        self._save_sync_seen()
+        import threading
+        self._flow_thread = threading.Thread(target=self._replay_sync, args=(s,),
+                                             daemon=True)
+        self._flow_thread.start()
+
+    def _replay_sync(self, s):
+        try:
+            total = int(s.get("total") or 0)
+            sent = int(s.get("sent_total") or s.get("up") or 0)
+            names = [n for n in (s.get("names") or []) if n]
+            result = s.get("result") or ("ok" if sent > 0 else "error")
+            self._flow_total = total
+            self._flow_up = 0
+            self._flow_cur = ""
+            self._flow_set("replay", "(T_T)", ["Заливаю", "на wpa-sec"])
+            n = max(sent, 0)
+            step = min(0.5, max(0.08, 2.2 / n)) if n else 0
+            for i in range(1, n + 1):
+                if self._pos != POS_DASH:
+                    break
+                self._flow_up = i
+                if names:
+                    self._flow_cur = names[min(i - 1, len(names) - 1)]
+                time.sleep(step)
+            self._flow_cur = ""
+            face, text = self._sync_result_face(result, sent, total)
+            self._flow_set("done" if result == "ok" else "fail", face, text)
+            self._sync_msg = " ".join(text)
+            time.sleep(3 if result == "ok" else 4)
+        except Exception:
+            logging.exception("[vslider] replay sync")
+        finally:
+            self._flow_done = True          # show the dashboard, don't loop
+            self._flow_set("idle", "", [])
+
+    @staticmethod
+    def _sync_result_face(result, sent, total):
+        if result == "ok":
+            if total and sent < total:
+                return "(^_^)", ["Залил часть:", "%d из %d" % (sent, total)]
+            return "(^o^)", ["Ура!", "загрузились!"]
+        if result == "no_profile":
+            return "(x_x)", ["Нет профиля", "рядом.", "закину потом"]
+        if result == "no_iface":
+            return "(x_x)", ["Радио не дало", "клиент :(", "это драйвер"]
+        if result in ("no_net", "offline"):
+            return "(T_T)", ["Подключился,", "но нет инета"]
+        if sent > 0:
+            return "(^_^)", ["Залил часть:", "%d из %d" % (sent, total)]
+        return "(T_T)", ["Не вышло.", "закину потом"]
 
     def _flow_run(self):
         ok_done = False
@@ -712,14 +864,14 @@ class Vslider(plugins.Plugin):
     def _draw_flow(self, canvas, drawer, W, H):
         # slim header
         self._rr(drawer, (2, 2, W - 2, 15), 4, fill=0x00)
-        t = "Wi-Fi AP" + ("" if self._ap_live else " (проверка)")
+        t = "wpa-sec" if self._flow_state in ("upload", "replay", "done") else "Wi-Fi Sync"
         drawer.text(((W - self._tw(drawer, t, self._f_small)) / 2, 3), t,
                     font=self._f_small, fill=0xFF)
         # face during upload grows from sad -> happy with progress
-        face = (self._progress_face() if self._flow_state == "upload"
+        face = (self._progress_face() if self._flow_state in ("upload", "replay")
                 else (self._flow_face or ""))
         text = self._flow_text or []
-        if self._flow_state in ("upload", "done"):
+        if self._flow_state in ("upload", "replay", "done"):
             # LEFT: big face + caption ; RIGHT: two huge, stretched numbers
             lx0, lx1 = 4, int(W * 0.46)
             fw = self._tw(drawer, face, self._f_big)
@@ -733,13 +885,14 @@ class Vslider(plugins.Plugin):
                 y += 16
             rx0, rx1 = int(W * 0.49), W - 4
             # leave room at the bottom for the current-network bar while uploading
-            bot = (H - 15) if (self._flow_state == "upload" and self._flow_cur) else (H - 4)
+            uploading = self._flow_state in ("upload", "replay")
+            bot = (H - 15) if (uploading and self._flow_cur) else (H - 4)
             drawer.text((rx0, 16), "хэши", font=self._f_small, fill=0x00)
             self._bignum(canvas, drawer, (rx0, 28, rx1, 62), str(self._flow_total))
             drawer.text((rx0, 66), "залито", font=self._f_small, fill=0x00)
             self._bignum(canvas, drawer, (rx0, 78, rx1, bot), str(self._flow_up))
             # bottom bar: which network is being uploaded right now
-            if self._flow_state == "upload" and self._flow_cur:
+            if uploading and self._flow_cur:
                 self._rr(drawer, (2, H - 13, W - 2, H - 1), 3, fill=0x00)
                 nm = self._clip(self._flow_cur, 30)
                 drawer.text(((W - self._tw(drawer, nm, self._f_small)) / 2, H - 13),
@@ -1335,7 +1488,8 @@ class Vslider(plugins.Plugin):
                 return jsonify(ok=True, pos=self._pos, hunt=hunt, sys=self._sys(),
                                cracked=self._cracked(dex, pot_ssids, pot_macs),
                                nearby=self._nearby_list(dex, pot_ssids, pot_macs),
-                               comic=self._comic(hunt), conn=self._conn)
+                               comic=self._comic(hunt), conn=self._conn,
+                               sync=self._sync_status())
             if path in (None, "", "/"):
                 return self._page()
             abort(404)
@@ -1364,7 +1518,23 @@ class Vslider(plugins.Plugin):
             self._apply()
             self._save_state()
             return jsonify(ok=True, pos=self._pos)
+        if request.args.get("action") == "sync":
+            ok, msg = self._launch_sync()
+            self._sync_msg = msg
+            return jsonify(ok=ok, msg=msg, sync=self._sync_status())
         abort(404)
+
+    def _sync_status(self):
+        """Live field-sync status for the web page (mirrors sync.json)."""
+        s = self._read_sync()
+        running = bool(s and not s.get("finished")
+                       and time.time() - s.get("ts", 0) < 300)
+        return {"running": running, "state": s.get("state", ""),
+                "result": s.get("result", ""), "total": s.get("total", 0),
+                "up": s.get("up", 0), "sent_total": s.get("sent_total", 0),
+                "cur": s.get("cur", ""), "net": s.get("net", ""),
+                "cracked": s.get("cracked", 0), "finished": bool(s.get("finished")),
+                "msg": self._sync_msg}
 
     def _page(self):
         token = ""
@@ -1431,6 +1601,10 @@ body{font-family:system-ui,-apple-system,sans-serif;background:var(--bg);color:v
 .subdots{display:flex;gap:6px;justify-content:center;margin-top:9px}
 .sd2{width:28px;height:4px;border-radius:3px;background:#30363d}.sd2.on{background:var(--gold)}
 .muted{color:var(--mut);font-size:.76rem;text-align:center;margin-top:12px}
+.syncbar{display:flex;align-items:center;gap:10px;background:var(--card);border:1px solid var(--line);border-radius:12px;padding:10px 12px;margin-bottom:10px}
+.syncbtn{background:var(--acc);color:#fff;border:0;border-radius:9px;padding:11px 14px;font-weight:700;font-size:14px;cursor:pointer;white-space:nowrap}
+.syncbtn:disabled{opacity:.55;cursor:default}
+.syncmsg{font-size:11px;color:var(--mut);flex:1;line-height:1.35}
 /* top-center switch animation overlay (plays on position change) */
 .sw{position:fixed;top:14px;left:50%;transform:translateX(-50%) translateY(-10px);z-index:50;
 opacity:0;pointer-events:none;transition:opacity .25s ease,transform .25s ease;
@@ -1571,7 +1745,23 @@ function renderPanel(){
   if(!D){$("#panel").innerHTML="";return;}
   if(POS===1){$("#panel").innerHTML='<div class="status"><div class="big">🟢 Auto — охота идёт</div><div class="hint">pwnagotchi сканирует и ловит как обычно.</div></div>';return;}
   if(POS===3){$("#panel").innerHTML='<div class="status"><div class="big">🟣 ??? — скоро</div><div class="hint">придумаем (Sync / Quiet / Disguise…)</div></div>';return;}
-  $("#panel").innerHTML='<div class="win">'+tabsBar(TABS[tabIdx].id)+'<div class="bd">'+renderTab()+'</div></div>';
+  $("#panel").innerHTML=syncBar()+'<div class="win">'+tabsBar(TABS[tabIdx].id)+'<div class="bd">'+renderTab()+'</div></div>';
+  const b=document.getElementById("syncbtn"); if(b)b.onclick=doSync;
+}
+function syncBar(){
+  const s=(D&&D.sync)||{};
+  const busy=s.running;
+  const label=busy?('Заливаю… '+(s.up||0)+(s.total?('/'+s.total):'')):'⬆️ Залить на wpa-sec';
+  let sub=esc(s.msg||'');
+  if(busy&&s.cur)sub+='<br>сеть: '+esc(s.cur);
+  return '<div class="syncbar"><button class="syncbtn" id="syncbtn"'+(busy?' disabled':'')+'>'+label+'</button>'
+    +'<div class="syncmsg">'+sub+'</div></div>';
+}
+async function doSync(){
+  if(!confirm("Девайс перезапустится на ~минуту, чтобы залить хэши. Рядом должна быть твоя сеть из профилей. Залить сейчас?"))return;
+  try{const j=await (await fetch(BASE+"?action=sync",{method:"POST",credentials:"same-origin",
+     headers:{"X-CSRFToken":CSRF,"Content-Type":"application/json"},body:"{}"})).json();
+     if(j&&j.sync&&D)D.sync=j.sync; renderPanel();}catch(e){}
 }
 function schedTab(){
   clearTimeout(tabTimer);clearInterval(subTimer);subTimer=null;
