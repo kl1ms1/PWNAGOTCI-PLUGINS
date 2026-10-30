@@ -74,8 +74,8 @@ finish(){                           # finish <result>
     RESULT="$1"; FIN=true; FINTS=$(date +%s); STATE=done
     case "$RESULT" in
         ok)         STAGE="done: sent $UP" ;;
-        no_profile) STAGE="no network in range"; STATE=error ;;
-        no_net)     STAGE="connected, no net"; STATE=error ;;
+        no_profile) STAGE="no known wifi nearby"; STATE=error ;;
+        no_net)     STAGE="connected, no internet"; STATE=error ;;
         no_iface)   STAGE="no radio iface"; STATE=error ;;
         *)          STAGE="error"; STATE=error ;;
     esac
@@ -129,18 +129,27 @@ fi
 /usr/bin/monstop 2>/dev/null
 ip link set wlan0mon down 2>/dev/null
 iw dev wlan0mon del 2>/dev/null
-# make sure a managed wlan0 exists (monitor setup may leave only wlan0mon)
-if ! iw dev "$IFACE" info >/dev/null 2>&1; then
+
+# (re)create a managed wlan0. brcmfmac sometimes makes the vif vanish, so this
+# is a helper we can call again at any point to self-heal ("wlan0 does not exist").
+ensure_client_iface(){
+    if iw dev "$IFACE" info >/dev/null 2>&1; then
+        ip link set "$IFACE" up 2>/dev/null; return 0
+    fi
+    local PHY
     PHY=$(ls /sys/class/ieee80211/ 2>/dev/null | head -1); [ -z "$PHY" ] && PHY=phy0
-    log "wlan0 missing -> creating a managed interface on $PHY"
+    iw dev wlan0mon del 2>/dev/null
     iw phy "$PHY" interface add "$IFACE" type managed 2>/dev/null
     sleep 1
-fi
+    rfkill unblock wifi 2>/dev/null
+    ip link set "$IFACE" up 2>/dev/null; sleep 1
+    iw dev "$IFACE" info >/dev/null 2>&1
+}
+
 rfkill unblock wifi
-ip link set "$IFACE" up 2>/dev/null; sleep 1
-if ! iw dev "$IFACE" info >/dev/null 2>&1; then
-    log "could not create a client interface on the radio — aborting (hunting restored)"
-    finish no_iface                 # <- the honest "driver wall" result
+if ! ensure_client_iface; then
+    log "could not create a client interface on the radio"
+    finish no_iface
     exit 1
 fi
 log "radio ready as $IFACE (client mode)"
@@ -148,6 +157,7 @@ emit search "radio ready"
 
 try_connect(){
     local ssid="$1" psk="$2"
+    ensure_client_iface || return 1          # self-heal if the vif vanished
     cat > /tmp/sync_wpa.conf <<EOF
 ctrl_interface=/run/wpa_supplicant
 network={
@@ -158,20 +168,67 @@ EOF
     pkill -f wpa_supplicant 2>/dev/null; sleep 1
     wpa_supplicant -B -i "$IFACE" -D nl80211 -c /tmp/sync_wpa.conf >/dev/null 2>&1
     sleep 9
+    iw dev "$IFACE" info >/dev/null 2>&1 || return 1   # vif vanished -> retry
     dhclient -1 "$IFACE" >/dev/null 2>&1
-    ip -4 addr show "$IFACE" | grep -q "inet " || return 1
+    ip -4 addr show "$IFACE" 2>/dev/null | grep -q "inet " || return 1
     ping -c1 -W3 8.8.8.8 >/dev/null 2>&1
 }
 
+# Scan what's actually in range and try ONLY profiled networks that are nearby,
+# STRONGEST signal first. So a profile that isn't around (e.g. a car dashcam) is
+# never probed, and the best-reception network is tried first.
+log "scanning for known networks nearby..."
+emit search "scanning"
+PLAN=$(IFACE="$IFACE" PROFILES="$PROFILES" python3 -I -c '
+import json, os, re, subprocess
+prof = json.load(open(os.environ["PROFILES"]))
+try:
+    out = subprocess.run(["iw", "dev", os.environ["IFACE"], "scan"],
+                         capture_output=True, text=True, timeout=25).stdout
+except Exception:
+    out = ""
+sig = -999; seen = {}; total = 0
+for ln in out.splitlines():
+    ln = ln.strip()
+    if ln.startswith("BSS "):
+        sig = -999
+    m = re.match(r"signal:\s*(-?\d+(?:\.\d+)?)", ln)
+    if m:
+        sig = float(m.group(1))
+    if ln.startswith("SSID: "):
+        ssid = ln[6:]; total += 1
+        if ssid and ssid in prof and (ssid not in seen or sig > seen[ssid]):
+            seen[ssid] = sig
+def pw(k):
+    v = prof[k]
+    return v.get("pw", "") if isinstance(v, dict) else str(v)
+if seen:                                     # known nets in range -> strongest first
+    for ssid, _s in sorted(seen.items(), key=lambda x: -x[1]):
+        print(ssid + chr(9) + pw(ssid))
+elif total == 0:                             # scan failed -> fall back to all profiles
+    for k in prof:
+        print(k + chr(9) + pw(k))
+# else: scan worked but none of ours is around -> print nothing (no_profile)
+' 2>/dev/null)
+
 ONLINE=""; CONNECTED_ANY=0
-while IFS=$'\t' read -r ssid psk; do
+if [ -n "$PLAN" ]; then
+  while IFS=$'\t' read -r ssid psk; do
     [ -z "$ssid" ] && continue
-    log "trying profile: $ssid"
-    NET="$ssid"; emit connect "try $ssid"
-    if try_connect "$ssid" "$psk"; then ONLINE="$ssid"; CONNECTED_ANY=1; break; fi
-    ip -4 addr show "$IFACE" | grep -q "inet " && CONNECTED_ANY=1
-    pkill -f wpa_supplicant 2>/dev/null; ip addr flush dev "$IFACE" 2>/dev/null
-done < <(python3 -I -c "import json;d=json.load(open('$PROFILES'));[print(k+chr(9)+((v.get('pw','') if isinstance(v,dict) else str(v)))) for k,v in d.items()]" 2>/dev/null)
+    for attempt in 1 2; do
+        log "trying profile: $ssid (attempt $attempt)"
+        NET="$ssid"; emit connect "try $ssid"
+        if try_connect "$ssid" "$psk"; then ONLINE="$ssid"; CONNECTED_ANY=1; break; fi
+        ip -4 addr show "$IFACE" 2>/dev/null | grep -q "inet " && CONNECTED_ANY=1
+        # tear down + rebuild a fresh vif before the retry / next network
+        pkill -f wpa_supplicant 2>/dev/null
+        ip addr flush dev "$IFACE" 2>/dev/null
+        iw dev "$IFACE" del 2>/dev/null
+        sleep 1
+    done
+    [ -n "$ONLINE" ] && break
+  done <<< "$PLAN"
+fi
 
 if [ -z "$ONLINE" ]; then
     if [ "$CONNECTED_ANY" = "1" ]; then

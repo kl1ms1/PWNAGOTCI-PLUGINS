@@ -159,13 +159,14 @@ def render(W, H, s, history):
     cur = s.get("cur") or ""
     finished = bool(s.get("finished"))
 
-    f_small = _font(12)
-    f_lbl = _font(13)
+    f_small = _font(10)               # the status log — small so more fits
+    f_hdr = _font(11)
+    f_lbl = _font(12)
 
     # header
-    d.rectangle((2, 2, W - 2, 15), fill=0)
+    d.rectangle((2, 2, W - 2, 14), fill=0)
     hdr = "wpa-sec sync"
-    d.text(((W - _tw(d, hdr, f_small)) / 2, 3), hdr, font=f_small, fill=255)
+    d.text(((W - _tw(d, hdr, f_hdr)) / 2, 2), hdr, font=f_hdr, fill=255)
 
     # LEFT: the numbers, shifted left; same big stretched "liquid" digits
     lx0, lx1 = 3, int(W * 0.46)
@@ -176,15 +177,16 @@ def render(W, H, s, history):
 
     # RIGHT: the live status log (the same stages you saw in the terminal)
     rx0 = int(W * 0.49) + 2
-    d.line((rx0 - 3, 18, rx0 - 3, H - 3), fill=0)
-    lines = list(history)[-6:]
+    d.line((rx0 - 3, 16, rx0 - 3, H - 2), fill=0)
+    lines = list(history)[-8:]
     if not finished and state == "upload":
         live = "up %d/%d" % (up, total)
         if cur:
             live += " " + cur
         lines = lines + [live]
+        lines = lines[-8:]
     maxw = W - rx0 - 3
-    y = 19
+    y = 17
     n = len(lines)
     for i, ln in enumerate(lines):
         pref = "> " if i == n - 1 else "  "
@@ -193,8 +195,8 @@ def render(W, H, s, history):
             ln = ln[:-1]
             txt = pref + ln + "…"
         d.text((rx0, y), txt, font=f_small, fill=0)
-        y += 16
-        if y > H - 13:
+        y += 13
+        if y > H - 11:
             break
 
     if ROTATE:
