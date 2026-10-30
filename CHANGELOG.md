@@ -112,6 +112,20 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.6.6
+- **Field upload actually works now.** Proven on-device: the chip *can* switch to
+  client mode — the earlier failures were our own (bettercap holding the radio,
+  the monitor vif not removed, a broken `dhclient -timeout`). `_client_connect`
+  now asks bettercap to stop, **fully removes the `wlan0mon` monitor vif** to free
+  the single radio, associates in managed mode, and gets a lease with a plain
+  `dhclient` (this image has no `udhcpc`). So with `ap_live=true` the pos-2 flow
+  connects to a saved profile and really uploads to wpa-sec — no phone, PC or
+  Bluetooth needed; `_client_disconnect` restores the monitor for hunting.
+
+### 0.6.5
+- Switched client-connect DHCP to `dhclient`/`udhcpc` away from the broken
+  `dhclient -timeout` (superseded by 0.6.6's tested recipe).
+
 ### 0.6.4
 - **After "Ура! загрузились!" it waits ~3 s, then drops back to the normal
   dashboard (info tabs) while staying on pos 2** — it no longer freezes on the

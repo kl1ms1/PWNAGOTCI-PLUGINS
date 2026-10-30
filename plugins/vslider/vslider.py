@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.5"
+    __version__ = "0.6.6"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -459,25 +459,28 @@ class Vslider(plugins.Plugin):
         return len(self._uploaded)
 
     def _client_connect(self, ssid, pw):
+        # Proven recipe (tested on this device): free the single radio by asking
+        # bettercap to stop and FULLY removing the monitor vif, then associate in
+        # managed mode and get a lease with a plain dhclient (no -timeout; this
+        # image has no udhcpc).
         try:
+            self._run("wifi.recon off")
             self._sh(["/usr/bin/monstop"])
+            self._sh(["ip", "link", "set", "wlan0mon", "down"])
+            self._sh(["iw", "dev", "wlan0mon", "del"])
             self._sh(["rfkill", "unblock", "wifi"])
             self._sh(["ip", "link", "set", self._ap_iface, "up"])
             conf = "/tmp/vslider_wpa.conf"
             with open(conf, "w") as f:
                 f.write('ctrl_interface=/run/wpa_supplicant\nnetwork={\n'
                         '    ssid="%s"\n    psk="%s"\n}\n' % (ssid, pw))
-            self._sh(["pkill", "-f", "wpa_supplicant.*" + self._ap_iface])
+            self._sh(["pkill", "-f", "wpa_supplicant"])
             import subprocess
             subprocess.Popen(["wpa_supplicant", "-B", "-i", self._ap_iface,
                               "-D", "nl80211", "-c", conf],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(8)
-            # get an IP via udhcpc (this image's dhclient has no -timeout);
-            # fall back to a plain dhclient if udhcpc isn't there.
-            rc, _ = self._sh(["udhcpc", "-i", self._ap_iface, "-n", "-q", "-t", "8"], timeout=30)
-            if rc != 0:
-                self._sh(["dhclient", "-1", self._ap_iface], timeout=25)
+            time.sleep(9)
+            self._sh(["dhclient", "-1", self._ap_iface], timeout=30)
             _, out = self._sh(["ip", "-4", "addr", "show", self._ap_iface])
             return "inet " in out
         except Exception:
@@ -485,11 +488,12 @@ class Vslider(plugins.Plugin):
             return False
 
     def _client_disconnect(self):
-        self._sh(["pkill", "-f", "wpa_supplicant.*" + self._ap_iface])
-        self._sh(["pkill", "-f", "dhclient.*" + self._ap_iface])
+        self._sh(["pkill", "-f", "wpa_supplicant"])
+        self._sh(["dhclient", "-r", self._ap_iface])
+        self._sh(["pkill", "-f", "dhclient"])
         self._sh(["ip", "addr", "flush", "dev", self._ap_iface])
         self._sh(["ip", "link", "set", self._ap_iface, "down"])
-        self._sh(["/usr/bin/monstart"])     # bring the monitor back for scanning
+        self._sh(["/usr/bin/monstart"])     # bring the monitor back for hunting
         self._recon_state = None            # force recon to be re-asserted
 
     def _ap_up(self):
