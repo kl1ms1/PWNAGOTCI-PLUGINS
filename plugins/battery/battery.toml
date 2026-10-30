@@ -1,0 +1,31 @@
+# battery config. Copy into /etc/pwnagotchi/config.toml.
+#
+# Reads the UPS Lite fuel gauge (MAX17040, I2C 0x36) and shows an
+# iPhone-style battery icon + % in the top-right corner (uptime moves left).
+# On plug-in it plays a full-screen "⚡ USB подключён" animation.
+#
+# Needs I2C enabled:  sudo raspi-config  ->  Interface Options -> I2C -> Yes
+# Check the gauge is seen:  sudo i2cdetect -y 1   (expect "36")
+
+main.plugins.battery.enabled = true
+
+# I2C location of the UPS Lite gauge (defaults are correct for UPS Lite v1.3):
+# main.plugins.battery.i2c_bus = 1
+# main.plugins.battery.address = 0x36
+
+# Charging detection (variant A — NO soldering): treated as charging when the
+# cell voltage is at/above this, or the charge level is clearly rising.
+# main.plugins.battery.charge_volts = 4.15
+
+# Full-screen "plugged in" animation length, seconds:
+# main.plugins.battery.anim_seconds = 4
+
+# Layout tuning (if the icon/uptime overlap on your screen):
+#   x,y = icon top-left (0 = auto: top-right corner)
+#   uptime_shift = how many px to move the `uptime` label left
+# main.plugins.battery.x = 0
+# main.plugins.battery.y = 0
+# main.plugins.battery.uptime_shift = 46
+
+# Blink the icon when below this %:
+# main.plugins.battery.low_pct = 15

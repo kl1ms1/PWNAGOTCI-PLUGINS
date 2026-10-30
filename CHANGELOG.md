@@ -76,6 +76,17 @@ Versions of the plugins in this repository.
 ### 0.1.0
 - Network pokedex + password store + wpa-sec import.
 
+## battery
+
+### 0.1.0
+- First version. Reads the **UPS Lite** fuel gauge (MAX17040, I2C `0x36`) and
+  draws an **iPhone-style battery icon + %** in the top-right corner, shifting
+  the `uptime` label left to make room. Detects charging **without soldering**
+  (variant A — by cell voltage ≥ `charge_volts` or a rising charge level) and
+  plays a **full-screen "⚡ USB подключён"** animation on plug-in. Degrades
+  cleanly to blank when no HAT / no I2C is present. All positions and the
+  charge threshold are configurable.
+
 ## webshell
 
 ### 0.1.1
