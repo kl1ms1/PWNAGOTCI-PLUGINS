@@ -40,6 +40,9 @@ def fake_run(args, capture_output=False, text=False, timeout=None):
     return FakeCompleted(0,"")
 _sp.run=fake_run; _sp.Popen=FakePopen
 
+import socket as _socket
+_socket.getaddrinfo = lambda *a, **k: [(2, 1, 6, "", ("1.2.3.4", 443))]
+
 sys.path.insert(0,"/home/user/PWNAGOTCI-PLUGINS/plugins/vslider")
 import vslider
 
@@ -83,20 +86,33 @@ n3=v._upload_wpasec(on_progress=lambda c: ticks3.append(c))
 print("   total:", n3, " ticks:", ticks3)
 assert n3==6 and ticks3==[6]
 
-print("== 5. full LIVE _flow_run reaches 'done' with sunglasses + real counts ==")
+print("== 5. _do_upload: counter grows, current network name set, really posts ==")
 v2=mk()
-# _profiled_nearby: one profiled network visible
-v2._nearby=[{"ssid":"Kubtek-64_2","mac":"AA:BB:CC:DD:EE:FF","ch":6,"rssi":-40}]
+seen=[]
+_orig_post=v2._post_one
+def _rec(p):
+    seen.append(v2._flow_cur)
+    return _orig_post(p)
+v2._post_one=_rec
+v2._flow_state="upload"
+v2._do_upload()
+print("   flow_total:", v2._flow_total, " flow_up:", v2._flow_up, " networks:", seen)
+assert v2._flow_up==v2._flow_total==6, "all handshakes counted"
+assert all(seen), "current network name set for each upload"
+
+print("== 6. full LIVE _flow_run reaches 'done' (happy face) ==")
+v3=mk()
+v3._nearby=[{"ssid":"Kubtek-64_2","mac":"AA:BB:CC:DD:EE:FF","ch":6,"rssi":-40}]
 import json as _j
-pf=os.path.join(v2._dir,"profiles.json")
+pf=os.path.join(v3._dir,"profiles.json")
 _j.dump({"Kubtek-64_2":{"pw":"21051980"}}, open(pf,"w"))
-v2._profiles_f=pf
+v3._profiles_f=pf
 t0=_time.time()
-v2._flow_run()
+v3._flow_run()
 wall=_time.time()-t0
-print("   end state:", v2._flow_state, " (back to idle = ok)")
-print("   logical sleep budget during flow: %.1fs (real wall: %.2fs — never blocked)"%(slept[0],wall))
-print("   wpa-sec uploaded set:", sorted(v2._uploaded))
+print("   flow_done:", v3._flow_done, " face:", v3._flow_face, " (expect (^o^))")
+print("   logical sleep budget: %.1fs (real wall: %.2fs — never blocked)"%(slept[0],wall))
 assert wall < 2.0, "flow must not actually block"
+assert v3._flow_done and v3._flow_face=="(^o^)", "ends on the happy done screen"
 
 print("\nALL NETWORK-LOGIC TESTS PASSED")

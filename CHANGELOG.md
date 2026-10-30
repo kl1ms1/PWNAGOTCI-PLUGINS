@@ -112,6 +112,16 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.6.3
+- **Upload screen reacts to real progress.** The face grows from sad to happy as
+  more of your handshakes go up — `(T_T)` → `(._.)` → `(-_-)` → `(^_^)` — ending
+  on `(^o^)` **"Ура! загрузились!"**. The **залито** number climbs at the real
+  pace (fast for already-sent files, a real POST for new ones) and **pauses when
+  an upload fails** (no internet); after a few misses it stops and shows
+  `(T_T)` "Нет интернета". The **network being uploaded right now** is shown in a
+  bar at the bottom. A quick DNS check up front means it no longer hangs on POSTs
+  when offline. It really uploads (`ap_live=true`); dry-run just animates.
+
 ### 0.6.2
 - **Upload flow runs once, not in a loop.** On pos 2 it used to re-run the whole
   search → upload → "Я загрузил" sequence every epoch; now it runs once, stays on

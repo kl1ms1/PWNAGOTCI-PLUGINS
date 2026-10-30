@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.2"
+    __version__ = "0.6.3"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -117,6 +117,7 @@ class Vslider(plugins.Plugin):
         self._flow_text = []              # small caption lines (left column)
         self._flow_total = 0              # total handshakes (big number, top-right)
         self._flow_up = 0                 # uploaded so far (live number, bottom-right)
+        self._flow_cur = ""               # network name currently being uploaded
         self._flow_thread = None
         self._flow_done = False           # flow finished OK -> don't loop it
         self._bignum_cache = {}           # (text,w,h)->image, stretched "liquid" digits
@@ -316,11 +317,15 @@ class Vslider(plugins.Plugin):
                 ok = self._client_connect(ssid, near[0][1]) if self._ap_live else True
                 time.sleep(1 if self._ap_live else 2)
                 if ok:
-                    self._flow_set("upload", "(>_>)", ["Заливаю на", "wpa-sec..."])
-                    self._do_upload()      # bumps self._flow_up live (real in live mode)
-                    self._flow_set("done", "(⌐■_■)", ["Я загрузил,",
-                                                                     "я молодец!"])
-                    ok_done = True
+                    self._flow_set("upload", "(T_T)", ["Заливаю", "на wpa-sec"])
+                    self._do_upload()      # face+number grow with real progress
+                    if self._flow_total > 0 and self._flow_up >= self._flow_total:
+                        self._flow_set("done", "(^o^)", ["Ура!", "загрузились!"])
+                        ok_done = True
+                    else:
+                        self._flow_set("error", "(T_T)", ["Нет интернета",
+                                                          "не залилось"])
+                        time.sleep(3)
                 else:
                     self._flow_set("error", "(._.)", ["Не подключился.",
                                                       "закину потом"])
@@ -340,21 +345,74 @@ class Vslider(plugins.Plugin):
                 self._flow_set("idle", "", [])
 
     def _do_upload(self):
-        """Advance self._flow_up as handshakes upload — a live-counting number.
-        Real wpa-sec POSTs when ap_live=true; a visual count-up in dry-run
-        (which touches NO networking)."""
-        total = self._flow_total
-        if self._ap_live and self._wpasec_key:
-            # bottom number = total uploaded EVER; it ticks up as NEW ones go
-            self._flow_up = len(self._uploaded)
-            self._upload_wpasec(lambda n: setattr(self, "_flow_up", n))
-        else:
-            step = 0.15 if total <= 60 else max(0.02, 6.0 / max(1, total))
-            for i in range(1, total + 1):
-                if self._flow_state != "upload":
+        """Walk through ALL handshakes, growing the counter (and the face) at the
+        real pace: already-sent files tick fast, NEW files are really POSTed to
+        wpa-sec (ap_live) and tick only on success — so the number PAUSES when an
+        upload fails (no internet) and we give up after a few misses. The name of
+        the network being sent shows at the bottom. Dry-run just animates."""
+        import glob
+        live = bool(self._ap_live and self._wpasec_key)
+        pcaps = sorted(glob.glob(os.path.join(self._hs_dir, "*.pcap")))
+        self._flow_total = len(pcaps)
+        self._flow_up = 0
+        self._flow_cur = ""
+        if live and not self._have_net():
+            return                              # no internet -> stays sad / error
+        fails = 0
+        changed = False
+        for p in pcaps:
+            if self._flow_state != "upload":
+                break
+            name = os.path.basename(p)
+            self._flow_cur = self._net_from_pcap(name)
+            if name in self._uploaded:
+                self._flow_up += 1
+                time.sleep(0.12)                # already done -> quick tick
+                continue
+            if not live:
+                self._flow_up += 1
+                time.sleep(0.45)                # dry-run: animate a "send"
+                continue
+            if self._post_one(p):               # real upload
+                self._uploaded.add(name)
+                changed = True
+                self._flow_up += 1
+                fails = 0
+            else:
+                fails += 1                      # number PAUSES on a failed send
+                if fails >= 3:                  # looks like no internet -> stop
                     break
-                self._flow_up = i
-                time.sleep(step)
+        self._flow_cur = ""
+        if changed:
+            self._save_uploaded()
+
+    @staticmethod
+    def _net_from_pcap(name):
+        """Network name out of a pcap filename '<essid>_<bssid>.pcap'."""
+        import re
+        n = name[:-5] if name.lower().endswith(".pcap") else name
+        m = re.match(r"^(.*)_[0-9A-Fa-f]{12}$", n)
+        return (m.group(1) if m else n) or "?"
+
+    def _have_net(self):
+        """Quick check that the internet is reachable (so we don't hang on POSTs)."""
+        import socket
+        try:
+            socket.setdefaulttimeout(3)
+            socket.getaddrinfo("wpa-sec.stanev.org", 443)
+            return True
+        except Exception:
+            return False
+
+    def _post_one(self, path):
+        try:
+            import requests
+            with open(path, "rb") as f:
+                r = requests.post(self._wpasec_url, cookies={"key": self._wpasec_key},
+                                  files={"file": f}, timeout=30)
+            return r.status_code in (200, 302)
+        except Exception:
+            return False
 
     # --- live networking (only runs when ap_live=true) ---------------------
     def _upload_wpasec(self, on_progress=None, budget=180):
@@ -618,13 +676,29 @@ class Vslider(plugins.Plugin):
         else:
             self._tab_hunt(drawer, W, H, data)
 
+    def _progress_face(self):
+        """Sad when nothing's uploaded yet, happier as more of the total goes."""
+        t, u = self._flow_total or 0, self._flow_up or 0
+        if u <= 0:
+            return "(T_T)"
+        pct = (u / t) if t else 1.0
+        if pct < 0.34:
+            return "(._.)"
+        if pct < 0.67:
+            return "(-_-)"
+        if pct < 1.0:
+            return "(^_^)"
+        return "(^o^)"
+
     def _draw_flow(self, canvas, drawer, W, H):
         # slim header
         self._rr(drawer, (2, 2, W - 2, 15), 4, fill=0x00)
         t = "Wi-Fi AP" + ("" if self._ap_live else " (проверка)")
         drawer.text(((W - self._tw(drawer, t, self._f_small)) / 2, 3), t,
                     font=self._f_small, fill=0xFF)
-        face = self._flow_face or ""
+        # face during upload grows from sad -> happy with progress
+        face = (self._progress_face() if self._flow_state == "upload"
+                else (self._flow_face or ""))
         text = self._flow_text or []
         if self._flow_state in ("upload", "done"):
             # LEFT: big face + caption ; RIGHT: two huge, stretched numbers
@@ -639,10 +713,18 @@ class Vslider(plugins.Plugin):
                             font=self._f_val, fill=0x00)
                 y += 16
             rx0, rx1 = int(W * 0.49), W - 4
+            # leave room at the bottom for the current-network bar while uploading
+            bot = (H - 15) if (self._flow_state == "upload" and self._flow_cur) else (H - 4)
             drawer.text((rx0, 16), "хэши", font=self._f_small, fill=0x00)
             self._bignum(canvas, drawer, (rx0, 28, rx1, 62), str(self._flow_total))
             drawer.text((rx0, 66), "залито", font=self._f_small, fill=0x00)
-            self._bignum(canvas, drawer, (rx0, 78, rx1, H - 4), str(self._flow_up))
+            self._bignum(canvas, drawer, (rx0, 78, rx1, bot), str(self._flow_up))
+            # bottom bar: which network is being uploaded right now
+            if self._flow_state == "upload" and self._flow_cur:
+                self._rr(drawer, (2, H - 13, W - 2, H - 1), 3, fill=0x00)
+                nm = self._clip(self._flow_cur, 30)
+                drawer.text(((W - self._tw(drawer, nm, self._f_small)) / 2, H - 13),
+                            nm, font=self._f_small, fill=0xFF)
         else:
             # LEFT: big face ; RIGHT: caption lines (bigger text)
             drawer.text((6, 40), face, font=self._f_big, fill=0x00)
