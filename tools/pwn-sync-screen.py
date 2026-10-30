@@ -142,71 +142,60 @@ def _bignum(img, box, text, drawer):
     img.paste(tmp, (x0 + m, y0 + m))
 
 
-def render(W, H, s):
+def _clip(s, n):
+    s = str(s or "")
+    return s if len(s) <= n else s[:n - 1] + "…"
+
+
+def render(W, H, s, history):
+    """LEFT: two big stretched numbers (hs / up) that grow. RIGHT: a live status
+    log in small English words, so you can see the current step on the panel."""
     from PIL import Image, ImageDraw
     img = Image.new("1", (W, H), 255)         # 1 = white
     d = ImageDraw.Draw(img)
     state = s.get("state", "")
-    result = s.get("result", "")
     total = int(s.get("total") or 0)
     up = int(s.get("sent_total") or s.get("up") or 0)
     cur = s.get("cur") or ""
     finished = bool(s.get("finished"))
 
-    f_small = _font(13)
-    f_val = _font(16)
-    f_big = _font(26)
+    f_small = _font(12)
+    f_lbl = _font(13)
 
     # header
-    d.rectangle((2, 2, W - 2, 16), fill=0)
-    hdr = "wpa-sec"
+    d.rectangle((2, 2, W - 2, 15), fill=0)
+    hdr = "wpa-sec sync"
     d.text(((W - _tw(d, hdr, f_small)) / 2, 3), hdr, font=f_small, fill=255)
 
-    uploading = state in ("upload", "start", "search", "connect") and not finished
-    if finished:
-        face = _result_face(result, up)
-    elif uploading:
-        face = _face(total, up)
-    else:
-        face = "(o_o)"
+    # LEFT: the numbers, shifted left; same big stretched "liquid" digits
+    lx0, lx1 = 3, int(W * 0.46)
+    d.text((lx0 + 2, 17), "hs", font=f_lbl, fill=0)
+    _bignum(img, (lx0, 31, lx1, 61), str(total), d)
+    d.text((lx0 + 2, 64), "up", font=f_lbl, fill=0)
+    _bignum(img, (lx0, 78, lx1, H - 3), str(up), d)
 
-    # LEFT: face + caption
-    lx0, lx1 = 4, int(W * 0.46)
-    ff = f_big
-    while _tw(d, face, ff) > (lx1 - lx0 - 4) and ff.size > 12:
-        ff = _font(ff.size - 2)
-    fw = _tw(d, face, ff)
-    d.text((lx0 + (lx1 - lx0 - fw) / 2, 24), face, font=ff, fill=0)
-
-    if finished:
-        cap = {"ok": ["Ура!", "загрузились!"],
-               "no_profile": ["Нет профиля", "рядом"],
-               "no_iface": ["Радио не дало", "клиент :("],
-               "no_net": ["Есть сеть,", "нет инета"]}.get(result, ["Готово"])
-    elif state in ("start", "search"):
-        cap = ["Заливаю!", "жди,", "перезапуск"]
-    elif state == "connect":
-        cap = ["Подключаюсь", (s.get("net") or "")[:12]]
-    else:
-        cap = ["Заливаю", "на wpa-sec"]
-    y = 62
-    for ln in cap:
-        d.text((lx0 + 2, y), ln, font=f_val, fill=0)
-        y += 17
-
-    # RIGHT: two big stretched numbers
-    rx0, rx1 = int(W * 0.49), W - 4
-    bot = (H - 15) if (uploading and cur) else (H - 4)
-    d.text((rx0, 18), "хэши", font=f_small, fill=0)
-    _bignum(img, (rx0, 30, rx1, 62), str(total), d)
-    d.text((rx0, 66), "залито", font=f_small, fill=0)
-    _bignum(img, (rx0, 78, rx1, bot), str(up), d)
-
-    # bottom: current network
-    if uploading and cur:
-        d.rectangle((2, H - 13, W - 2, H - 1), fill=0)
-        nm = cur if len(cur) <= 30 else cur[:29] + "…"
-        d.text(((W - _tw(d, nm, f_small)) / 2, H - 13), nm, font=f_small, fill=255)
+    # RIGHT: the live status log (the same stages you saw in the terminal)
+    rx0 = int(W * 0.49) + 2
+    d.line((rx0 - 3, 18, rx0 - 3, H - 3), fill=0)
+    lines = list(history)[-6:]
+    if not finished and state == "upload":
+        live = "up %d/%d" % (up, total)
+        if cur:
+            live += " " + cur
+        lines = lines + [live]
+    maxw = W - rx0 - 3
+    y = 19
+    n = len(lines)
+    for i, ln in enumerate(lines):
+        pref = "> " if i == n - 1 else "  "
+        txt = pref + ln
+        while _tw(d, txt, f_small) > maxw and len(txt) > 3:
+            ln = ln[:-1]
+            txt = pref + ln + "…"
+        d.text((rx0, y), txt, font=f_small, fill=0)
+        y += 16
+        if y > H - 13:
+            break
 
     if ROTATE:
         img = img.rotate(ROTATE)
@@ -277,24 +266,34 @@ def main():
                     continue
 
     if probe:
+        hist = ["stopping pwnagotchi", "radio ready", "online: Xiaomi_67"]
         show(render(W, H, {"state": "upload", "total": 7, "up": 3,
-                           "cur": "TestNet"}), False)
-        print("drew a test frame (3/7). Looks right? then it's wired.")
+                           "cur": "TestNet", "stage": "uploading"}, hist), False)
+        print("drew a test frame (3/7) with a status log. Looks right? then it's wired.")
         try:
             epd.sleep()
         except Exception:
             pass
         return 0
 
+    history = []
+
+    def push(msg):
+        if msg and (not history or history[-1] != msg):
+            history.append(msg)
+            del history[:-12]
+
     last_key = None
     base_done = False
     try:
         while _RUN:
             s = read_sync()
-            key = (s.get("state"), s.get("sent_total") or s.get("up"),
+            push(s.get("stage") or s.get("state") or "")
+            key = (s.get("stage"), s.get("state"),
+                   s.get("sent_total") or s.get("up"),
                    s.get("cur"), s.get("finished"), s.get("result"))
             if key != last_key:
-                img = render(W, H, s)
+                img = render(W, H, s, history)
                 show(img, base_done)          # full first, partial after
                 base_done = True
                 last_key = key

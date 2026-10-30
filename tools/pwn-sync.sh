@@ -45,13 +45,14 @@ TS=$(date +%s)
 STATE=start; RESULT=""; TOTAL=0; UP=0; DONE0=0; CUR=""; NET=""; CRACKED=0
 FIN=false; FINTS=0
 NAMES=""                            # TAB-separated list of uploaded net names
+STAGE="start"                       # short human status for the live screen
 
-emit(){                             # emit [state] [result]
+emit(){                             # emit [state] [stage]
     [ -n "$1" ] && STATE="$1"
-    [ -n "$2" ] && RESULT="$2"
+    [ -n "$2" ] && STAGE="$2"
     V_TS="$TS" V_STATE="$STATE" V_RESULT="$RESULT" V_TOTAL="$TOTAL" V_UP="$UP" \
     V_DONE="$DONE0" V_CUR="$CUR" V_NET="$NET" V_CRACKED="$CRACKED" \
-    V_FIN="$FIN" V_FINTS="$FINTS" V_NAMES="$NAMES" \
+    V_FIN="$FIN" V_FINTS="$FINTS" V_NAMES="$NAMES" V_STAGE="$STAGE" \
     python3 -I -c '
 import json, os
 def i(k):
@@ -62,7 +63,7 @@ d = {"ts": i("V_TS"), "state": os.environ.get("V_STATE", ""),
      "result": os.environ.get("V_RESULT", ""), "total": i("V_TOTAL"),
      "up": i("V_UP"), "already": i("V_DONE"), "sent_total": i("V_DONE") + i("V_UP"),
      "cur": os.environ.get("V_CUR", ""), "net": os.environ.get("V_NET", ""),
-     "names": names, "cracked": i("V_CRACKED"),
+     "names": names, "cracked": i("V_CRACKED"), "stage": os.environ.get("V_STAGE", ""),
      "finished": os.environ.get("V_FIN", "false") == "true", "fin_ts": i("V_FINTS")}
 open("/root/.vslider/sync.json.tmp", "w").write(json.dumps(d))
 os.replace("/root/.vslider/sync.json.tmp", "/root/.vslider/sync.json")
@@ -71,7 +72,13 @@ os.replace("/root/.vslider/sync.json.tmp", "/root/.vslider/sync.json")
 
 finish(){                           # finish <result>
     RESULT="$1"; FIN=true; FINTS=$(date +%s); STATE=done
-    [ "$RESULT" = "ok" ] || STATE=error
+    case "$RESULT" in
+        ok)         STAGE="done: sent $UP" ;;
+        no_profile) STAGE="no network in range"; STATE=error ;;
+        no_net)     STAGE="connected, no net"; STATE=error ;;
+        no_iface)   STAGE="no radio iface"; STATE=error ;;
+        *)          STAGE="error"; STATE=error ;;
+    esac
     emit
 }
 
@@ -111,7 +118,7 @@ KEY=$(grep -E '^[[:space:]]*main\.plugins\.wpa-sec\.api_key' "$CFG" | head -1 | 
 sleep 3
 
 log "stopping pwnagotchi to borrow the radio..."
-emit search
+emit search "stopping pwnagotchi"
 systemctl stop pwnagotchi; sleep 2
 # take over the e-ink and draw LIVE progress while pwnagotchi is down
 if [ -f "$SCREEN" ]; then
@@ -137,6 +144,7 @@ if ! iw dev "$IFACE" info >/dev/null 2>&1; then
     exit 1
 fi
 log "radio ready as $IFACE (client mode)"
+emit search "radio ready"
 
 try_connect(){
     local ssid="$1" psk="$2"
@@ -159,7 +167,7 @@ ONLINE=""; CONNECTED_ANY=0
 while IFS=$'\t' read -r ssid psk; do
     [ -z "$ssid" ] && continue
     log "trying profile: $ssid"
-    NET="$ssid"; emit connect
+    NET="$ssid"; emit connect "try $ssid"
     if try_connect "$ssid" "$psk"; then ONLINE="$ssid"; CONNECTED_ANY=1; break; fi
     ip -4 addr show "$IFACE" | grep -q "inet " && CONNECTED_ANY=1
     pkill -f wpa_supplicant 2>/dev/null; ip addr flush dev "$IFACE" 2>/dev/null
@@ -177,9 +185,10 @@ if [ -z "$ONLINE" ]; then
 fi
 NET="$ONLINE"
 log "online via: $ONLINE"
+emit upload "online: $ONLINE"
 
 UP=0; FAIL=0
-emit upload
+emit upload "uploading"
 for p in "$HS_DIR"/*.pcap; do
     [ -f "$p" ] || continue
     name=$(basename "$p")
@@ -187,23 +196,33 @@ for p in "$HS_DIR"/*.pcap; do
     net=$(echo "$name" | sed -E 's/\.pcap$//; s/_[0-9A-Fa-f]{12}$//')
     CUR="$net"
     grep -qxF "$name" "$SENT" && continue        # already uploaded -> skip
-    code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 40 -b "key=$KEY" -F "file=@$p" "$WPASEC" 2>/dev/null)
+    # curl can return 000 on a flaky link — retry each file a few times
+    code=""
+    for attempt in 1 2 3; do
+        code=$(curl -s -o /dev/null -w "%{http_code}" --max-time 60 -b "key=$KEY" -F "file=@$p" "$WPASEC" 2>/dev/null)
+        [ "$code" = "200" ] || [ "$code" = "302" ] && break
+        sleep 2
+    done
     if [ "$code" = "200" ] || [ "$code" = "302" ]; then
-        echo "$name" >> "$SENT"; UP=$((UP+1))
+        echo "$name" >> "$SENT"; UP=$((UP+1)); FAIL=0   # reset on success
         NAMES="$NAMES$net"$'\t'
-        emit upload
+        emit upload "uploading"
+        sleep 1                                   # breathe between uploads
     else
-        FAIL=$((FAIL+1)); [ "$FAIL" -ge 5 ] && { log "too many upload failures ($code), stopping"; break; }
+        FAIL=$((FAIL+1))
+        [ "$FAIL" -ge 8 ] && { log "too many upload failures ($code), stopping"; break; }
     fi
 done
 CUR=""
 log "uploaded $UP new handshake(s)"
+STAGE="sent $UP new"; emit upload
 
 # pull cracked passwords back (updates the potfile pwndex/vslider read)
 if curl -s --max-time 40 -b "key=$KEY" "$WPASEC/?api&dl=1" -o /tmp/cracked.potfile 2>/dev/null && [ -s /tmp/cracked.potfile ]; then
     cp /tmp/cracked.potfile "$HS_DIR/wpa-sec.cracked.potfile"
     CRACKED=$(wc -l < /tmp/cracked.potfile)
     log "downloaded cracked list: $CRACKED line(s)"
+    STAGE="cracked $CRACKED"; emit upload
 fi
 
 finish ok
