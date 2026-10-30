@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.6"
+    __version__ = "0.6.7"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -304,6 +304,7 @@ class Vslider(plugins.Plugin):
 
     def _flow_run(self):
         ok_done = False
+        tried = False
         try:
             self._flow_total = self._pcap_count()
             self._flow_up = 0
@@ -318,6 +319,7 @@ class Vslider(plugins.Plugin):
                                                  "закину потом"])
                 time.sleep(3)
             else:
+                tried = True            # made a real attempt -> don't loop it
                 ssid = near[0][0]
                 self._flow_set("connect", "(o_o)", ["Нашёл:", self._clip(ssid, 12),
                                                     "подключаюсь..."])
@@ -346,9 +348,10 @@ class Vslider(plugins.Plugin):
             logging.exception("[vslider] pos-2 flow failed")
             ok_done = False
         finally:
-            # done OR gave up -> drop back to the normal dashboard (info) on pos 2;
-            # don't loop the flow again until we leave pos 2 and come back.
-            if ok_done and self._pos == POS_DASH:
+            # after any real attempt (success OR failure) -> back to the dashboard
+            # on pos 2 and DON'T loop the flow again until we leave and return.
+            # "no profiles nearby" is not an attempt, so that keeps re-scanning.
+            if (ok_done or tried) and self._pos == POS_DASH:
                 self._flow_done = True
             self._flow_set("idle", "", [])
 
@@ -768,12 +771,16 @@ class Vslider(plugins.Plugin):
             mode = getattr(canvas, "mode", "1")
             tmp = Image.new(mode, (tw + 4, th + 2), 0xFF)
             ImageDraw.Draw(tmp).text((2, 0), text, font=font, fill=0x00)
-            img = tmp.resize((bw, bh))
+            # scale to FIT the box keeping aspect — big but readable, not squished
+            s = min(bw / float(tw + 4), bh / float(th + 2))
+            nw, nh = max(1, int((tw + 4) * s)), max(1, int((th + 2) * s))
+            img = tmp.resize((nw, nh))
             if len(self._bignum_cache) > 64:
                 self._bignum_cache.clear()
             self._bignum_cache[key] = img
         try:
-            canvas.paste(img, (x0, y0))
+            nw, nh = img.size
+            canvas.paste(img, (x0 + (bw - nw) // 2, y0 + (bh - nh) // 2))
         except Exception:
             drawer.text((x0, y0), text, font=self._f_big, fill=0x00)
 
