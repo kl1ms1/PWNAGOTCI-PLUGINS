@@ -1,0 +1,9 @@
+# wpasync config. Copy into /etc/pwnagotchi/config.toml.
+#
+# Adds a "Upload to wpa-sec NOW" web button that forces the built-in wpa-sec
+# plugin to run its upload + download immediately (when the device has internet).
+# Needs the wpa-sec plugin enabled with an api_key.
+#
+# Open: http://<ip>:8080/plugins/wpasync/
+
+main.plugins.wpasync.enabled = true

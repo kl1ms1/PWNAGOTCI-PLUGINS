@@ -56,6 +56,7 @@ Device acting up (`APS 0`, crashes, `bus is down`, wiped config)? — [`docs/TRO
 | [brain](plugins/brain/) | 0.3.1 | ✅ | AI agent (bandit): learns and picks scanning channels; on a decision the face turns into `(A_I)` and speaks |
 | [voice_ru](plugins/voice_ru/) | 1.0.0 | ✅ | pwnagotchi speaks Russian — all phrases translated in memory (updates don't wipe it) |
 | [battery](plugins/battery/) | 0.1.0 | 🏗️ | iPhone-style battery % + icon for **UPS Lite** (MAX17040 / I2C 0x36); on USB plug-in a full-screen "⚡ USB подключён" animation (no soldering) |
+| [wpasync](plugins/wpasync/) | 0.1.0 | 🏗️ | "Upload to wpa-sec NOW" web button — forces the built-in wpa-sec plugin to upload handshakes + download cracked results on demand (checks internet first) |
 | [webshell](plugins/webshell/) | 0.1.1 | ✅ | Web file manager + ROOT terminal for your own device (browse/edit/download/delete + run commands; optional password) |
 | [full_save](plugins/full_save/) | 0.1.0 | ✅ | One good handshake per network: whitelist fully-captured nets, tidy duplicate .pcaps (safe — moves to trash, never leaves the handshakes dir) |
 | [vslider](plugins/vslider/) | 0.6.7 | 🏗️ | Virtual 3-position slider (web + **e-ink**) with a switch animation: Auto / tabbed Dashboard (pauses hunting; Охота·Система·Комикс·Пароли·№5, auto-rotating) / reserved |
