@@ -130,26 +130,46 @@ fi
 ip link set wlan0mon down 2>/dev/null
 iw dev wlan0mon del 2>/dev/null
 
-# (re)create a managed wlan0. brcmfmac sometimes makes the vif vanish, so this
-# is a helper we can call again at any point to self-heal ("wlan0 does not exist").
+# (re)create a managed wlan0. brcmfmac is flaky — the vif (and sometimes the
+# whole phy) comes and goes — so we RETRY with waits and log every step.
 ensure_client_iface(){
-    if iw dev "$IFACE" info >/dev/null 2>&1; then
-        ip link set "$IFACE" up 2>/dev/null; return 0
-    fi
-    local PHY
-    PHY=$(ls /sys/class/ieee80211/ 2>/dev/null | head -1); [ -z "$PHY" ] && PHY=phy0
-    iw dev wlan0mon del 2>/dev/null
-    iw phy "$PHY" interface add "$IFACE" type managed 2>/dev/null
-    sleep 1
-    rfkill unblock wifi 2>/dev/null
-    ip link set "$IFACE" up 2>/dev/null; sleep 1
-    iw dev "$IFACE" info >/dev/null 2>&1
+    local t PHY
+    for t in 1 2 3 4 5 6; do
+        if iw dev "$IFACE" info >/dev/null 2>&1; then
+            ip link set "$IFACE" up 2>/dev/null
+            return 0
+        fi
+        log "make $IFACE: attempt $t"
+        emit search "make wlan0 ($t)"
+        iw dev wlan0mon del 2>/dev/null           # free the single radio
+        /usr/bin/monstop 2>/dev/null
+        PHY=$(ls /sys/class/ieee80211/ 2>/dev/null | head -1)
+        if [ -z "$PHY" ]; then
+            log "  no phy yet (radio down) — waiting for it to come back"
+            emit search "radio down, wait"
+            rfkill unblock wifi 2>/dev/null
+            sleep 3
+            PHY=$(ls /sys/class/ieee80211/ 2>/dev/null | head -1)
+        fi
+        if [ -n "$PHY" ]; then
+            log "  phy=$PHY -> adding managed $IFACE"
+            iw phy "$PHY" interface add "$IFACE" type managed 2>/dev/null
+            rfkill unblock wifi 2>/dev/null
+            ip link set "$IFACE" up 2>/dev/null
+            sleep 2
+            iw dev "$IFACE" info >/dev/null 2>&1 && { log "  $IFACE is up"; return 0; }
+            log "  $IFACE still missing after add"
+        fi
+        sleep 2
+    done
+    return 1
 }
 
 rfkill unblock wifi
 if ! ensure_client_iface; then
-    log "could not create a client interface on the radio"
+    log "could not create a client interface on the radio (gave up after retries)"
     finish no_iface
+    sleep 4                           # let the e-ink show the reason before restore
     exit 1
 fi
 log "radio ready as $IFACE (client mode)"
@@ -213,6 +233,9 @@ elif total == 0:                             # scan failed -> fall back to all p
 
 ONLINE=""; CONNECTED_ANY=0
 if [ -n "$PLAN" ]; then
+  NCOUNT=$(printf '%s\n' "$PLAN" | grep -c .)
+  log "known networks in range: $NCOUNT (strongest first)"
+  emit search "found $NCOUNT nearby"
   while IFS=$'\t' read -r ssid psk; do
     [ -z "$ssid" ] && continue
     for attempt in 1 2; do
@@ -238,6 +261,7 @@ if [ -z "$ONLINE" ]; then
         log "no profiled network in range — nothing to do"
         finish no_profile
     fi
+    sleep 4                           # let the e-ink show the reason before restore
     exit 0
 fi
 NET="$ONLINE"
