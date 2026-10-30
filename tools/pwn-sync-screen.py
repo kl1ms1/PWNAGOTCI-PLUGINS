@@ -26,7 +26,24 @@ import time
 
 SYNC = "/root/.vslider/sync.json"
 ROTATE = 180                       # waveshare_4 on this build is mounted upside-down
+# pwnagotchi lives in a venv on the jayofelony image; its driver + PIL are there,
+# so re-exec into it if we were started with the system python.
+VENV_PY = os.environ.get("PWN_VENV", "/home/pi/.pwn/bin/python3")
 _RUN = True
+
+
+def _ensure_venv():
+    try:
+        import pwnagotchi  # noqa: F401
+        return
+    except Exception:
+        pass
+    try:
+        if os.path.exists(VENV_PY) and \
+                os.path.realpath(sys.executable) != os.path.realpath(VENV_PY):
+            os.execv(VENV_PY, [VENV_PY] + sys.argv)
+    except Exception:
+        pass
 
 
 def _stop(*_a):
@@ -44,10 +61,12 @@ def load_epd():
     paths pwnagotchi bundles the Waveshare V4 driver under."""
     attempts = []
     candidates = [
+        # jayofelony image (confirmed path)
+        ("pwnagotchi.ui.hw.libs.waveshare.epaper.v2in13_V4.epd2in13_V4", "EPD"),
+        # other layouts / standalone lib, just in case
         ("waveshare_epd.epd2in13_V4", "EPD"),
         ("pwnagotchi.ui.hw.libs.waveshare.v4.epd2in13_V4", "EPD"),
         ("pwnagotchi.ui.hw.libs.waveshare.epd2in13_V4", "EPD"),
-        ("pwnagotchi.ui.hw.libs.waveshare.v2.waveshare", "EPD"),
     ]
     for path, cls in candidates:
         try:
@@ -204,6 +223,7 @@ def read_sync():
 
 def main():
     probe = "--probe" in sys.argv
+    _ensure_venv()                      # jump into pwnagotchi's venv if needed
     # the panel may still be releasing from pwnagotchi — retry the open a few times
     epd = name = None
     for _ in range(10):
@@ -219,18 +239,34 @@ def main():
         return 2
     if probe:
         print("driver OK:", name)
-    try:
-        epd.init()
-    except Exception as e:
+    inited = False
+    for arg in ((), (0,)):               # V4 is init(); some drivers want init(0)
+        try:
+            epd.init(*arg)
+            inited = True
+            break
+        except TypeError:
+            continue
+        except Exception as e:
+            if probe:
+                print("init failed:", e)
+            return 2
+    if not inited:
         if probe:
-            print("init failed:", e)
+            print("init failed: no working init() signature")
         return 2
     # landscape dimensions (driver reports native portrait 122x250)
     W = max(getattr(epd, "width", 122), getattr(epd, "height", 250))
     H = min(getattr(epd, "width", 122), getattr(epd, "height", 250))
 
     def show(img, partial):
-        buf = epd.getbuffer(img)
+        try:
+            buf = epd.getbuffer(img)
+        except Exception:
+            try:                          # driver wants the other orientation
+                buf = epd.getbuffer(img.rotate(90, expand=True))
+            except Exception:
+                return
         for meth in (("displayPartial",) if partial else ()) + ("display",):
             fn = getattr(epd, meth, None)
             if fn:

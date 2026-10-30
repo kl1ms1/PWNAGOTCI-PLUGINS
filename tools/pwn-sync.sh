@@ -34,6 +34,8 @@ CFG=/etc/pwnagotchi/config.toml
 SCRIPT_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo /home/pi)
 SCREEN="$SCRIPT_DIR/pwn-sync-screen.py"   # LIVE e-ink while pwnagotchi is down
 [ -f "$SCREEN" ] || SCREEN=/home/pi/pwn-sync-screen.py
+PWN_PY=/home/pi/.pwn/bin/python3          # pwnagotchi's venv (has the EPD driver)
+[ -x "$PWN_PY" ] || PWN_PY=python3
 SCREEN_PID=""
 
 mkdir -p "$VDIR"; touch "$SENT"
@@ -113,9 +115,9 @@ emit search
 systemctl stop pwnagotchi; sleep 2
 # take over the e-ink and draw LIVE progress while pwnagotchi is down
 if [ -f "$SCREEN" ]; then
-    python3 "$SCREEN" >/dev/null 2>&1 &
+    "$PWN_PY" "$SCREEN" >/dev/null 2>&1 &
     SCREEN_PID=$!
-    log "live screen started (pid $SCREEN_PID)"
+    log "live screen started (pid $SCREEN_PID, $PWN_PY)"
 fi
 /usr/bin/monstop 2>/dev/null
 ip link set wlan0mon down 2>/dev/null
