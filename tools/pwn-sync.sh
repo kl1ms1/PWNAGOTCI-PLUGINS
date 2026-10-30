@@ -33,6 +33,7 @@ restore(){
     dhclient -r "$IFACE" 2>/dev/null
     ip addr flush dev "$IFACE" 2>/dev/null
     ip link set "$IFACE" down 2>/dev/null
+    /usr/bin/monstart 2>/dev/null      # bring the monitor back
     systemctl start pwnagotchi
     log "pwnagotchi restarted."
 }
@@ -47,10 +48,23 @@ mkdir -p "$(dirname "$SENT")"; touch "$SENT"
 
 log "stopping pwnagotchi to borrow the radio..."
 systemctl stop pwnagotchi; sleep 2
+/usr/bin/monstop 2>/dev/null
 ip link set wlan0mon down 2>/dev/null
 iw dev wlan0mon del 2>/dev/null
+# make sure a managed wlan0 exists (monitor setup may leave only wlan0mon)
+if ! iw dev "$IFACE" info >/dev/null 2>&1; then
+    PHY=$(ls /sys/class/ieee80211/ 2>/dev/null | head -1); [ -z "$PHY" ] && PHY=phy0
+    log "wlan0 missing -> creating a managed interface on $PHY"
+    iw phy "$PHY" interface add "$IFACE" type managed 2>/dev/null
+    sleep 1
+fi
 rfkill unblock wifi
-ip link set "$IFACE" up; sleep 1
+ip link set "$IFACE" up 2>/dev/null; sleep 1
+if ! iw dev "$IFACE" info >/dev/null 2>&1; then
+    log "could not create a client interface on the radio — aborting (hunting restored)"
+    exit 1
+fi
+log "radio ready as $IFACE (client mode)"
 
 try_connect(){
     local ssid="$1" psk="$2"
