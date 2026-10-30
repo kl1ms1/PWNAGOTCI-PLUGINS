@@ -44,6 +44,7 @@ pwnagotchi-plugins/
 
 📖 New to this? Full step-by-step tutorial: [`docs/TUTORIAL-SSH.md`](docs/TUTORIAL-SSH.md).
 Short version with troubleshooting — [`docs/INSTALLING.md`](docs/INSTALLING.md).
+Device acting up (`APS 0`, crashes, `bus is down`, wiped config)? — [`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md).
 
 ## 🧩 Plugins
 
