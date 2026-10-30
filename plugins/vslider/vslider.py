@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.4"
+    __version__ = "0.6.5"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -472,10 +472,12 @@ class Vslider(plugins.Plugin):
             subprocess.Popen(["wpa_supplicant", "-B", "-i", self._ap_iface,
                               "-D", "nl80211", "-c", conf],
                              stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-            time.sleep(7)
-            rc, _ = self._sh(["dhclient", "-1", "-timeout", "20", self._ap_iface], timeout=25)
+            time.sleep(8)
+            # get an IP via udhcpc (this image's dhclient has no -timeout);
+            # fall back to a plain dhclient if udhcpc isn't there.
+            rc, _ = self._sh(["udhcpc", "-i", self._ap_iface, "-n", "-q", "-t", "8"], timeout=30)
             if rc != 0:
-                self._sh(["udhcpc", "-i", self._ap_iface, "-n", "-q", "-t", "5"], timeout=25)
+                self._sh(["dhclient", "-1", self._ap_iface], timeout=25)
             _, out = self._sh(["ip", "-4", "addr", "show", self._ap_iface])
             return "inet " in out
         except Exception:
