@@ -112,6 +112,12 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.6.2
+- **Upload flow runs once, not in a loop.** On pos 2 it used to re-run the whole
+  search → upload → "Я загрузил" sequence every epoch; now it runs once, stays on
+  the "Я загрузил, молодец!" result screen, and only runs again when you leave
+  pos 2 and come back. (No-profile/error states still retry.)
+
 ### 0.6.1
 - **Redesigned the Wi-Fi flow screen.** Two columns: on the **left** a big face
   + caption, on the **right** two **huge, stretched "liquid-glass" numbers** —

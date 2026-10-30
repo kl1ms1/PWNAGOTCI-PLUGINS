@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.1"
+    __version__ = "0.6.2"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -118,6 +118,7 @@ class Vslider(plugins.Plugin):
         self._flow_total = 0              # total handshakes (big number, top-right)
         self._flow_up = 0                 # uploaded so far (live number, bottom-right)
         self._flow_thread = None
+        self._flow_done = False           # flow finished OK -> don't loop it
         self._bignum_cache = {}           # (text,w,h)->image, stretched "liquid" digits
 
     # --- lifecycle ---------------------------------------------------------
@@ -278,6 +279,8 @@ class Vslider(plugins.Plugin):
         self._flow_text = text or []
 
     def _start_flow(self):
+        if self._flow_done:            # already ran once on this pos-2 visit
+            return
         if self._flow_thread and self._flow_thread.is_alive():
             return
         if self._flow_state == "idle":
@@ -286,11 +289,13 @@ class Vslider(plugins.Plugin):
             self._flow_thread.start()
 
     def _stop_flow(self):
+        self._flow_done = False        # leaving pos 2 -> allow the flow again next time
         if self._flow_state != "idle":
             self._flow_set("idle", "", [])
         self._ap_down()
 
     def _flow_run(self):
+        ok_done = False
         try:
             self._flow_total = self._pcap_count()
             self._flow_up = 0
@@ -315,7 +320,7 @@ class Vslider(plugins.Plugin):
                     self._do_upload()      # bumps self._flow_up live (real in live mode)
                     self._flow_set("done", "(⌐■_■)", ["Я загрузил,",
                                                                      "я молодец!"])
-                    time.sleep(4)
+                    ok_done = True
                 else:
                     self._flow_set("error", "(._.)", ["Не подключился.",
                                                       "закину потом"])
@@ -326,8 +331,13 @@ class Vslider(plugins.Plugin):
                 self._ap_up()
         except Exception:
             logging.exception("[vslider] pos-2 flow failed")
+            ok_done = False
         finally:
-            self._flow_set("idle", "", [])
+            if ok_done and self._pos == POS_DASH:
+                # success: keep the "Я загрузил" screen, run once (don't loop)
+                self._flow_done = True
+            else:
+                self._flow_set("idle", "", [])
 
     def _do_upload(self):
         """Advance self._flow_up as handshakes upload — a live-counting number.
