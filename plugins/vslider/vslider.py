@@ -108,6 +108,7 @@ class Vslider(plugins.Plugin):
         self._hostapd_conf = "/tmp/vslider_hostapd.conf"
         self._dnsmasq_conf = "/tmp/vslider_dnsmasq.conf"
         self._ap_live = False             # actually touch networking (else dry-run)
+        self._ap_raise = False            # also raise our OWN AP after uploading
         self._profiles_f = "/root/.pwndex/profiles.json"
         self._wpasec_key = ""
         self._wpasec_url = "https://wpa-sec.stanev.org"
@@ -132,6 +133,7 @@ class Vslider(plugins.Plugin):
         self._dex_f = o.get("pwndex", self._dex_f)
         self._ap_mode = bool(o.get("ap_mode", False))
         self._ap_live = bool(o.get("ap_live", False))   # false = dry-run (safe)
+        self._ap_raise = bool(o.get("ap_raise", False)) # raise own AP after upload
         self._ap_iface = o.get("ap_iface", self._ap_iface)
         self._ap_ip = o.get("ap_ip", self._ap_ip)
         self._profiles_f = o.get("profiles", self._profiles_f)
@@ -332,7 +334,7 @@ class Vslider(plugins.Plugin):
                     time.sleep(3)
                 if self._ap_live:
                     self._client_disconnect()
-            if self._pos == POS_DASH and self._ap_live:
+            if self._pos == POS_DASH and self._ap_live and self._ap_raise:
                 self._ap_up()
         except Exception:
             logging.exception("[vslider] pos-2 flow failed")
