@@ -30,6 +30,12 @@ main.plugins.vslider.enabled = true
 # profile in range, and systemd-run (ships with systemd). Copy the script once:
 #   scp tools/pwn-sync.sh pi@10.0.0.2:/home/pi/pwn-sync.sh
 # main.plugins.vslider.sync_script = "/home/pi/pwn-sync.sh"
+#
+# Hands-free: with sync_auto = true you don't have to press the button — being
+# on Dashboard (pos 2) auto-runs the upload ONCE whenever a saved profile is in
+# range, then waits sync_cooldown seconds before it may run again. Default off.
+# main.plugins.vslider.sync_auto = true
+# main.plugins.vslider.sync_cooldown = 900     # seconds between auto-syncs
 
 # --- Wi-Fi access point flow on Dashboard (pos 2) — EXPERIMENTAL ---
 # ap_mode: run the pos-2 flow (search profiles -> upload to wpa-sec -> own AP).

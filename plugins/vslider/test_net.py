@@ -176,4 +176,29 @@ v7._maybe_replay_sync()
 print("   old run: seen_ts set:",v7._sync_seen_ts>0," no replay thread:",v7._flow_thread is None)
 assert v7._sync_seen_ts>0 and v7._flow_thread is None
 
+print("== 11. _maybe_auto_sync: fires once when a profile is near, respects cooldown ==")
+v8=mk(); v8._sync_auto=True
+launches=[]
+v8._launch_sync=lambda: (launches.append(1), (True,"ok"))[1]
+# no profile nearby -> nothing
+v8._nearby=[]
+v8._maybe_auto_sync()
+assert launches==[] and not v8._sync_auto_done
+# profile nearby -> fire once, then guarded
+v8._nearby=[{"ssid":"Kubtek-64_2","mac":"AA","ch":6,"rssi":-40}]
+import json as _j3
+_j3.dump({"Kubtek-64_2":{"pw":"x"}}, open(os.path.join(v8._dir,"p.json"),"w"))
+v8._profiles_f=os.path.join(v8._dir,"p.json")
+v8._maybe_auto_sync(); v8._maybe_auto_sync()
+print("   launches after 2 calls:",len(launches)," done:",v8._sync_auto_done)
+assert len(launches)==1 and v8._sync_auto_done
+# cooldown: a run finished seconds ago -> no fire, just mark done
+v9=mk(); v9._sync_auto=True
+v9._launch_sync=lambda: (launches.append(1), (True,"ok"))[1]
+v9._nearby=v8._nearby; v9._profiles_f=v8._profiles_f
+_j3.dump({"finished":True,"fin_ts":int(_time.time())}, open(v9._sync_f,"w"))
+v9._maybe_auto_sync()
+print("   within cooldown: extra launches:",len(launches)-1," done:",v9._sync_auto_done)
+assert len(launches)==1 and v9._sync_auto_done
+
 print("\nALL NETWORK-LOGIC TESTS PASSED")

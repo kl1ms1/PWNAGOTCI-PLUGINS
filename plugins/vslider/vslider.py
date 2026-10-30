@@ -131,6 +131,9 @@ class Vslider(plugins.Plugin):
         self._sync_seen_f = os.path.join(self._dir, "sync_seen.json")
         self._sync_seen_ts = 0            # fin_ts of the last run we already showed
         self._sync_msg = "Готов. Жми «Залить», когда рядом твоя сеть."
+        self._sync_auto = False           # auto-run the field sync on pos 2 (hands-free)
+        self._sync_auto_done = False      # already fired on this pos-2 visit
+        self._sync_cooldown = 900         # min seconds between auto-syncs
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
@@ -147,6 +150,11 @@ class Vslider(plugins.Plugin):
         self._ap_ip = o.get("ap_ip", self._ap_ip)
         self._profiles_f = o.get("profiles", self._profiles_f)
         self._sync_script = o.get("sync_script", self._sync_script)
+        self._sync_auto = bool(o.get("sync_auto", False))
+        try:
+            self._sync_cooldown = int(o.get("sync_cooldown", self._sync_cooldown))
+        except Exception:
+            pass
         self._eink = bool(o.get("eink", True))
         pos = o.get("eink_position")
         if pos:
@@ -187,10 +195,16 @@ class Vslider(plugins.Plugin):
                 self._start_flow()
             else:
                 self._stop_flow()
-        # keep recon in the right state. In AP mode on pos 2 we KEEP scanning so
-        # the flow (and the dashboard) can see nearby profiled networks — except
-        # while the flow is actively connecting/uploading (it owns the radio then).
-        if self._ap_mode and self._pos == POS_DASH:
+        # hands-free field sync: on pos 2, if enabled, fire it when a saved
+        # profile is actually in range (guarded to once per visit + a cooldown).
+        if self._sync_auto and self._pos == POS_DASH:
+            self._maybe_auto_sync()
+        elif self._pos != POS_DASH:
+            self._sync_auto_done = False      # left pos 2 -> allow auto again
+        # keep recon in the right state. In AP mode OR auto-sync on pos 2 we KEEP
+        # scanning so we can see nearby profiled networks — except while the flow
+        # is actively connecting/uploading (it owns the radio then).
+        if (self._ap_mode or self._sync_auto) and self._pos == POS_DASH:
             if self._flow_state in ("idle", "search", "none"):
                 self._set_recon(True)
         else:
@@ -246,9 +260,10 @@ class Vslider(plugins.Plugin):
     def _apply(self):
         # Dashboard (pos 2) with ap_mode runs the Wi-Fi flow; otherwise just
         # pause/resume hunting as before.
-        if self._ap_mode and self._pos == POS_DASH:
-            self._set_recon(True)      # keep scanning so the flow can find profiles
-            self._start_flow()
+        if (self._ap_mode or self._sync_auto) and self._pos == POS_DASH:
+            self._set_recon(True)      # keep scanning so we can find profiles
+            if self._ap_mode:
+                self._start_flow()
         else:
             self._stop_flow()
             self._set_recon(self._pos != POS_DASH)
@@ -381,6 +396,28 @@ class Vslider(plugins.Plugin):
             return False, "Не смог запустить: %s" % e
         logging.info("[vslider] field sync launched (%s)", unit)
         return True, "Запустил заливку. Девайс сам перезапустится и покажет результат на экране."
+
+    def _maybe_auto_sync(self):
+        """Hands-free: launch the field sync once on a pos-2 visit, but only if a
+        saved profile is actually nearby and we didn't just sync (cooldown)."""
+        if self._sync_auto_done:
+            return
+        if self._flow_state != "idle":
+            return
+        now = time.time()
+        s = self._read_sync()
+        if s and not s.get("finished") and now - s.get("ts", 0) < 300:
+            self._sync_auto_done = True       # a run is already going
+            return
+        if s and s.get("finished") and now - (s.get("fin_ts") or 0) < self._sync_cooldown:
+            self._sync_auto_done = True        # synced recently -> wait out cooldown
+            return
+        if not self._profiled_nearby():
+            return                             # no known network in range yet
+        self._sync_auto_done = True
+        ok, msg = self._launch_sync()
+        self._sync_msg = msg
+        logging.info("[vslider] auto-sync: %s (%s)", ok, msg)
 
     def _maybe_replay_sync(self):
         """After pwn-sync.sh finishes (and pwnagotchi restarts), replay the
@@ -861,6 +898,14 @@ class Vslider(plugins.Plugin):
             return "(^_^)"
         return "(^o^)"
 
+    def _fit_font(self, drawer, text, maxw, fonts_list):
+        """Largest font from the list whose text width fits maxw (keeps the face
+        big but inside its column so it never spills off the e-ink)."""
+        for f in fonts_list:
+            if f is not None and self._tw(drawer, text, f) <= maxw:
+                return f
+        return fonts_list[-1] or self._f_small
+
     def _draw_flow(self, canvas, drawer, W, H):
         # slim header
         self._rr(drawer, (2, 2, W - 2, 15), 4, fill=0x00)
@@ -874,9 +919,11 @@ class Vslider(plugins.Plugin):
         if self._flow_state in ("upload", "replay", "done"):
             # LEFT: big face + caption ; RIGHT: two huge, stretched numbers
             lx0, lx1 = 4, int(W * 0.46)
-            fw = self._tw(drawer, face, self._f_big)
-            drawer.text((lx0 + (lx1 - lx0 - fw) / 2, 20), face,
-                        font=self._f_big, fill=0x00)
+            ff = self._fit_font(drawer, face, lx1 - lx0 - 4,
+                                [self._f_big, self._f_val, self._f_small])
+            fw = self._tw(drawer, face, ff)
+            drawer.text((lx0 + (lx1 - lx0 - fw) / 2, 22), face,
+                        font=ff, fill=0x00)
             y = 60
             for ln in text:
                 lw = self._tw(drawer, ln, self._f_val)
@@ -899,9 +946,11 @@ class Vslider(plugins.Plugin):
                             nm, font=self._f_small, fill=0xFF)
         else:
             # LEFT: big face ; RIGHT: caption lines (bigger text)
-            drawer.text((6, 40), face, font=self._f_big, fill=0x00)
-            y = 28
             rx = int(W * 0.44)
+            ff = self._fit_font(drawer, face, rx - 8,
+                                [self._f_big, self._f_val, self._f_small])
+            drawer.text((6, 40), face, font=ff, fill=0x00)
+            y = 28
             for ln in text:
                 drawer.text((rx, y), ln, font=self._f_val, fill=0x00)
                 y += 20
@@ -924,9 +973,10 @@ class Vslider(plugins.Plugin):
             mode = getattr(canvas, "mode", "1")
             tmp = Image.new(mode, (tw + 4, th + 2), 0xFF)
             ImageDraw.Draw(tmp).text((2, 0), text, font=font, fill=0x00)
-            # scale to FIT the box keeping aspect — big but readable, not squished
-            s = min(bw / float(tw + 4), bh / float(th + 2))
-            nw, nh = max(1, int((tw + 4) * s)), max(1, int((th + 2) * s))
+            # STRETCH to fill the whole box (non-uniform) — the big "liquid-glass"
+            # digits, with a tiny inset so they don't touch the edges
+            m = 2
+            nw, nh = max(1, bw - 2 * m), max(1, bh - 2 * m)
             img = tmp.resize((nw, nh))
             if len(self._bignum_cache) > 64:
                 self._bignum_cache.clear()
@@ -1515,6 +1565,7 @@ class Vslider(plugins.Plugin):
                 self._tab_idx = 0
                 self._sub_idx = 0
                 self._tab_since = time.time()
+                self._sync_auto_done = False   # allow one auto-sync on this visit
             self._apply()
             self._save_state()
             return jsonify(ok=True, pos=self._pos)
