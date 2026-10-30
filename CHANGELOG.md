@@ -112,6 +112,17 @@ Versions of the plugins in this repository.
 
 ## vslider
 
+### 0.6.4
+- **After "Ура! загрузились!" it waits ~3 s, then drops back to the normal
+  dashboard (info tabs) while staying on pos 2** — it no longer freezes on the
+  done screen or jumps to pos 1, and won't re-run the flow until you leave pos 2
+  and return.
+- **Fixed "no networks" in live mode.** Connecting to a profile used to kill the
+  monitor interface and scanning never came back, so the next run saw nothing.
+  Now the monitor is restored after the client connection and scanning stays on
+  in AP mode (except while actively connecting/uploading), so profiled networks
+  are found again.
+
 ### 0.6.3
 - **Upload screen reacts to real progress.** The face grows from sad to happy as
   more of your handshakes go up — `(T_T)` → `(._.)` → `(-_-)` → `(^_^)` — ending

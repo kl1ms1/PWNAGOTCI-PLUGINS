@@ -59,7 +59,7 @@ class _DashWidget(_Widget):
 
 class Vslider(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.6.3"
+    __version__ = "0.6.4"
     __license__ = "MIT"
     __description__ = "Virtual slider: Auto / tabbed Dashboard / reserved (web UI)."
 
@@ -174,8 +174,13 @@ class Vslider(plugins.Plugin):
                 self._start_flow()
             else:
                 self._stop_flow()
-        # keep recon in the right state (unless the AP flow owns the radio).
-        if not (self._ap_mode and self._pos == POS_DASH):
+        # keep recon in the right state. In AP mode on pos 2 we KEEP scanning so
+        # the flow (and the dashboard) can see nearby profiled networks — except
+        # while the flow is actively connecting/uploading (it owns the radio then).
+        if self._ap_mode and self._pos == POS_DASH:
+            if self._flow_state in ("idle", "search", "none"):
+                self._set_recon(True)
+        else:
             self._set_recon(self._pos != POS_DASH)
 
     def on_handshake(self, agent, filename, access_point, client_station):
@@ -229,7 +234,7 @@ class Vslider(plugins.Plugin):
         # Dashboard (pos 2) with ap_mode runs the Wi-Fi flow; otherwise just
         # pause/resume hunting as before.
         if self._ap_mode and self._pos == POS_DASH:
-            self._set_recon(False)
+            self._set_recon(True)      # keep scanning so the flow can find profiles
             self._start_flow()
         else:
             self._stop_flow()
@@ -323,6 +328,7 @@ class Vslider(plugins.Plugin):
                     self._do_upload()      # face+number grow with real progress
                     if self._flow_total > 0 and self._flow_up >= self._flow_total:
                         self._flow_set("done", "(^o^)", ["Ура!", "загрузились!"])
+                        time.sleep(3)          # hold the "Ура" a couple seconds
                         ok_done = True
                     else:
                         self._flow_set("error", "(T_T)", ["Нет интернета",
@@ -333,18 +339,18 @@ class Vslider(plugins.Plugin):
                                                       "закину потом"])
                     time.sleep(3)
                 if self._ap_live:
-                    self._client_disconnect()
+                    self._client_disconnect()   # restores the monitor for scanning
             if self._pos == POS_DASH and self._ap_live and self._ap_raise:
                 self._ap_up()
         except Exception:
             logging.exception("[vslider] pos-2 flow failed")
             ok_done = False
         finally:
+            # done OR gave up -> drop back to the normal dashboard (info) on pos 2;
+            # don't loop the flow again until we leave pos 2 and come back.
             if ok_done and self._pos == POS_DASH:
-                # success: keep the "Я загрузил" screen, run once (don't loop)
                 self._flow_done = True
-            else:
-                self._flow_set("idle", "", [])
+            self._flow_set("idle", "", [])
 
     def _do_upload(self):
         """Walk through ALL handshakes, growing the counter (and the face) at the
@@ -481,6 +487,8 @@ class Vslider(plugins.Plugin):
         self._sh(["pkill", "-f", "dhclient.*" + self._ap_iface])
         self._sh(["ip", "addr", "flush", "dev", self._ap_iface])
         self._sh(["ip", "link", "set", self._ap_iface, "down"])
+        self._sh(["/usr/bin/monstart"])     # bring the monitor back for scanning
+        self._recon_state = None            # force recon to be re-asserted
 
     def _ap_up(self):
         if self._ap_on or not self._ap_live:

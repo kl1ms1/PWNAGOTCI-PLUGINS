@@ -110,9 +110,9 @@ v3._profiles_f=pf
 t0=_time.time()
 v3._flow_run()
 wall=_time.time()-t0
-print("   flow_done:", v3._flow_done, " face:", v3._flow_face, " (expect (^o^))")
+print("   flow_done:", v3._flow_done, " end state:", v3._flow_state, " (expect idle=dashboard)")
 print("   logical sleep budget: %.1fs (real wall: %.2fs — never blocked)"%(slept[0],wall))
 assert wall < 2.0, "flow must not actually block"
-assert v3._flow_done and v3._flow_face=="(^o^)", "ends on the happy done screen"
+assert v3._flow_done and v3._flow_state=="idle", "after success: dashboard, no re-loop"
 
 print("\nALL NETWORK-LOGIC TESTS PASSED")
