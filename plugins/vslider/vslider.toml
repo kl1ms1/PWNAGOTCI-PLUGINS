@@ -36,6 +36,12 @@ main.plugins.vslider.enabled = true
 # range, then waits sync_cooldown seconds before it may run again. Default off.
 # main.plugins.vslider.sync_auto = true
 # main.plugins.vslider.sync_cooldown = 900     # seconds between auto-syncs
+#
+# LIVE screen while uploading: copy tools/pwn-sync-screen.py next to pwn-sync.sh
+# (e.g. /home/pi/pwn-sync-screen.py). pwn-sync.sh then takes over the e-ink while
+# pwnagotchi is stopped and shows the number growing DURING the real upload.
+# Check the panel driver is detected first (draws a test "3/7" frame):
+#   sudo python3 /home/pi/pwn-sync-screen.py --probe
 
 # --- Wi-Fi access point flow on Dashboard (pos 2) — EXPERIMENTAL ---
 # ap_mode: run the pos-2 flow (search profiles -> upload to wpa-sec -> own AP).

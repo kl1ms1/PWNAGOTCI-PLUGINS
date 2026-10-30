@@ -31,6 +31,10 @@ VDIR=/root/.vslider
 SENT="$VDIR/sent.txt"               # basenames already uploaded (fast re-runs)
 SYNC="$VDIR/sync.json"              # live progress for the vslider screen
 CFG=/etc/pwnagotchi/config.toml
+SCRIPT_DIR=$(cd "$(dirname "$0")" 2>/dev/null && pwd || echo /home/pi)
+SCREEN="$SCRIPT_DIR/pwn-sync-screen.py"   # LIVE e-ink while pwnagotchi is down
+[ -f "$SCREEN" ] || SCREEN=/home/pi/pwn-sync-screen.py
+SCREEN_PID=""
 
 mkdir -p "$VDIR"; touch "$SENT"
 
@@ -74,6 +78,8 @@ log(){ echo "[pwn-sync] $*"; }
 # ALWAYS restore hunting, even if something fails midway.
 restore(){
     log "restoring hunting..."
+    [ -n "$SCREEN_PID" ] && kill "$SCREEN_PID" 2>/dev/null   # drop the live e-ink
+    pkill -f pwn-sync-screen.py 2>/dev/null
     pkill -f wpa_supplicant 2>/dev/null
     dhclient -r "$IFACE" 2>/dev/null
     ip addr flush dev "$IFACE" 2>/dev/null
@@ -105,6 +111,12 @@ sleep 3
 log "stopping pwnagotchi to borrow the radio..."
 emit search
 systemctl stop pwnagotchi; sleep 2
+# take over the e-ink and draw LIVE progress while pwnagotchi is down
+if [ -f "$SCREEN" ]; then
+    python3 "$SCREEN" >/dev/null 2>&1 &
+    SCREEN_PID=$!
+    log "live screen started (pid $SCREEN_PID)"
+fi
 /usr/bin/monstop 2>/dev/null
 ip link set wlan0mon down 2>/dev/null
 iw dev wlan0mon del 2>/dev/null
