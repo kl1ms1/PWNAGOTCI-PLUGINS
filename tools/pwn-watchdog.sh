@@ -32,23 +32,45 @@ fi
 # --- the watchdog loop ------------------------------------------------------
 cat > "$SCRIPT" <<EOF
 #!/usr/bin/env bash
-# Auto-heal pwnagotchi's "waiting for bettercap API" hang. Installed by pwn-watchdog.sh.
+# Auto-heal pwnagotchi: (1) the "waiting for bettercap API" startup hang, and
+# (2) the BCM43430 radio firmware crash ("bus is down") that shows up as
+# "0 networks" until the driver re-inits. Installed by pwn-watchdog.sh.
 LOG="$LOG"
+MARK=/tmp/pwn_busdown
 set +e
+# baseline the bus-down counter so old crashes already in the ring buffer don't
+# trigger a restart on the very first check
+dmesg 2>/dev/null | grep -c "bus is down" > "\$MARK"
 while true; do
     sleep 90
+    # our field-sync stops pwnagotchi on purpose and juggles the radio — don't fight it
+    pgrep -f pwn-sync.sh >/dev/null 2>&1 && continue
     systemctl is-active --quiet pwnagotchi || continue
-    [ -f "\$LOG" ] || continue
-    # stuck = almost every one of the last 12 log lines is the bettercap wait
-    stuck=\$(tail -n 12 "\$LOG" 2>/dev/null | grep -c "waiting for bettercap API")
-    if [ "\${stuck:-0}" -ge 10 ]; then
-        logger -t pwn-watchdog "pwnagotchi stuck waiting for bettercap -> restarting engine"
-        if systemctl list-unit-files 2>/dev/null | grep -q '^bettercap'; then
-            systemctl restart bettercap
-            sleep 10
+
+    # (1) bettercap startup hang
+    if [ -f "\$LOG" ]; then
+        stuck=\$(tail -n 12 "\$LOG" 2>/dev/null | grep -c "waiting for bettercap API")
+        if [ "\${stuck:-0}" -ge 10 ]; then
+            logger -t pwn-watchdog "stuck waiting for bettercap -> restarting engine"
+            if systemctl list-unit-files 2>/dev/null | grep -q '^bettercap'; then
+                systemctl restart bettercap; sleep 10
+            fi
+            systemctl restart pwnagotchi
+            dmesg 2>/dev/null | grep -c "bus is down" > "\$MARK"
+            sleep 150
+            continue
         fi
+    fi
+
+    # (2) radio firmware crash: a NEW "bus is down" since last check -> re-init
+    busdown=\$(dmesg 2>/dev/null | grep -c "bus is down")
+    prev=\$(cat "\$MARK" 2>/dev/null || echo 0)
+    echo "\${busdown:-0}" > "\$MARK"
+    if [ "\${busdown:-0}" -gt "\${prev:-0}" ]; then
+        logger -t pwn-watchdog "radio bus-down detected (\$prev -> \$busdown) -> restarting pwnagotchi"
         systemctl restart pwnagotchi
-        sleep 150   # let it come all the way up before checking again
+        dmesg 2>/dev/null | grep -c "bus is down" > "\$MARK"
+        sleep 150
     fi
 done
 EOF
