@@ -29,3 +29,13 @@ main.plugins.btlink.enabled = true
 
 # Where to draw "BT: code ..." on the e-ink (x,y):
 # main.plugins.btlink.position = "0,95"
+
+# --- BT-PAN tether (our own replacement for bt-tether) ---
+# Set your iPhone's Bluetooth MAC and btlink will dial its Personal Hotspot over
+# Bluetooth, bring up bnep0 and get an IP (shown on the e-ink). Needs the phone
+# paired once (step 3) + Personal Hotspot ON. Find the MAC on the Pi:
+#   sudo bluetoothctl --timeout 10 scan on   (then: sudo bluetoothctl devices)
+# For the bt-network path also: sudo apt install -y bluez-tools
+# main.plugins.btlink.phone_mac = "AA:BB:CC:DD:EE:FF"
+# main.plugins.btlink.auto_pan  = true
+# main.plugins.btlink.pan_iface = "bnep0"

@@ -34,6 +34,7 @@ Own device only.
 import logging
 import random
 import subprocess
+import time
 
 import pwnagotchi.plugins as plugins
 
@@ -48,9 +49,9 @@ except Exception:
 
 class BTLink(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.1.0"
+    __version__ = "0.2.0"
     __license__ = "MIT"
-    __description__ = "Bluetooth pairing + on-screen link code for the Pwn Companion app."
+    __description__ = "Bluetooth link for the Pwn Companion app: PAN tether + on-screen code (replaces bt-tether)."
 
     def __init__(self):
         self._alias = "pwnagotchi"
@@ -61,6 +62,13 @@ class BTLink(plugins.Plugin):
         self._code = ""
         self._unlocked = False
         self._bt_ok = None
+        # BT-PAN (our own replacement for bt-tether): dial the phone's hotspot
+        self._phone_mac = ""
+        self._auto_pan = True
+        self._pan_iface = "bnep0"
+        self._pan_ip = ""
+        self._last_pan = 0.0
+        self._pan_proc = None
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
@@ -75,7 +83,10 @@ class BTLink(plugins.Plugin):
             self._pos = (int(x), int(y))
         except Exception:
             pass
-        logging.info("[btlink] loaded")
+        self._phone_mac = str(o.get("phone_mac", "") or "").upper().strip()
+        self._auto_pan = bool(o.get("auto_pan", True))
+        self._pan_iface = o.get("pan_iface", self._pan_iface)
+        logging.info("[btlink] loaded (phone=%s)", self._phone_mac or "-")
 
     def _sh(self, args, timeout=10):
         try:
@@ -105,6 +116,79 @@ class BTLink(plugins.Plugin):
         except Exception:
             logging.exception("[btlink] bluetooth setup failed")
 
+    # --- BT-PAN: join the phone's Bluetooth hotspot (replaces bt-tether) ----
+    def _iface_ip(self):
+        ok, out = self._sh(["ip", "-4", "addr", "show", self._pan_iface])
+        if not ok:
+            return ""
+        for tok in out.split():
+            if tok.count(".") == 3 and "/" in tok:
+                return tok.split("/")[0]
+        return ""
+
+    def _ensure_pan(self):
+        """If a phone MAC is set and we're not on its network yet, connect the
+        Bluetooth PAN and get a lease. Tries bt-network (bluez-tools) then a
+        D-Bus Network1.Connect, then dhclient. Safe to call repeatedly."""
+        if not (self._phone_mac and self._auto_pan):
+            return
+        ip = self._iface_ip()
+        if ip:
+            self._pan_ip = ip
+            return
+        mac = self._phone_mac
+        self._sh(["bluetoothctl", "trust", mac])
+        self._sh(["bluetoothctl", "connect", mac], timeout=15)
+        # 1) bt-network CLI (bluez-tools), if present
+        brought_up = False
+        try:
+            import shutil
+            if shutil.which("bt-network"):
+                import subprocess
+                if self._pan_proc is None or self._pan_proc.poll() is not None:
+                    self._pan_proc = subprocess.Popen(
+                        ["bt-network", "-c", mac, "nap"],
+                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                brought_up = True
+        except Exception:
+            logging.debug("[btlink] bt-network failed")
+        # 2) D-Bus org.bluez Network1.Connect("nap")
+        if not brought_up:
+            brought_up = self._pan_via_dbus(mac)
+        time.sleep(3)
+        self._sh(["dhclient", "-1", self._pan_iface], timeout=25)
+        ip = self._iface_ip()
+        if ip:
+            self._pan_ip = ip
+            logging.info("[btlink] PAN up: %s on %s", ip, self._pan_iface)
+        else:
+            logging.info("[btlink] PAN not up yet (phone hotspot on? paired?)")
+
+    def _pan_via_dbus(self, mac):
+        try:
+            import dbus
+            bus = dbus.SystemBus()
+            adapter_path = "/org/bluez/hci0"
+            dev = "dev_" + mac.replace(":", "_")
+            path = adapter_path + "/" + dev
+            obj = bus.get_object("org.bluez", path)
+            net = dbus.Interface(obj, "org.bluez.Network1")
+            net.Connect("nap")
+            return True
+        except Exception as e:
+            logging.debug("[btlink] dbus PAN: %s", e)
+            return False
+
+    def on_epoch(self, agent, epoch, epoch_data):
+        now = time.time()
+        if now - self._last_pan < 20:
+            return
+        self._last_pan = now
+        try:
+            self._ensure_pan()
+        except Exception:
+            logging.exception("[btlink] ensure_pan")
+
     # --- e-ink -------------------------------------------------------------
     def on_ui_setup(self, ui):
         if LabeledValue is None:
@@ -120,7 +204,11 @@ class BTLink(plugins.Plugin):
 
     def on_ui_update(self, ui):
         try:
-            if self._require_code and not self._unlocked:
+            if self._pan_ip:
+                msg = self._pan_ip                      # we're on the phone's net
+            elif self._phone_mac and self._auto_pan:
+                msg = "code %s / BT.." % self._code
+            elif self._require_code and not self._unlocked:
                 msg = "code %s" % self._code
             elif self._unlocked:
                 msg = "linked"
@@ -131,6 +219,11 @@ class BTLink(plugins.Plugin):
             pass
 
     def on_unload(self, ui):
+        try:
+            if self._pan_proc is not None:
+                self._pan_proc.terminate()
+        except Exception:
+            pass
         try:
             self._sh(["bluetoothctl", "discoverable", "off"])
         except Exception:
