@@ -1,0 +1,10 @@
+# companion config. Copy into /etc/pwnagotchi/config.toml.
+#
+# JSON API that powers the Pwn Companion app (live status, pwndex browse/edit,
+# device control). Open from the app, or test in a browser:
+#   http://<ip>:8080/plugins/companion/?action=status
+
+main.plugins.companion.enabled = true
+
+# Where pwndex stores its catalog (for the networks tab):
+# main.plugins.companion.pwndex = "/root/.pwndex/dex.json"

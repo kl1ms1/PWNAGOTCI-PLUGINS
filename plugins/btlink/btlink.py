@@ -126,12 +126,29 @@ class BTLink(plugins.Plugin):
                 return tok.split("/")[0]
         return ""
 
+    def _auto_mac(self):
+        """Pick the phone automatically: a currently-connected device first,
+        else a paired one — so you never have to type the MAC."""
+        for args in (["devices", "Connected"], ["paired-devices"], ["devices", "Paired"]):
+            ok, out = self._sh(["bluetoothctl"] + args)
+            if not ok:
+                continue
+            for line in out.splitlines():
+                p = line.split()
+                if len(p) >= 2 and p[0] == "Device":
+                    return p[1].upper()
+        return ""
+
     def _ensure_pan(self):
-        """If a phone MAC is set and we're not on its network yet, connect the
-        Bluetooth PAN and get a lease. Tries bt-network (bluez-tools) then a
-        D-Bus Network1.Connect, then dhclient. Safe to call repeatedly."""
-        if not (self._phone_mac and self._auto_pan):
+        """If we're not on the phone's network yet, connect the Bluetooth PAN
+        and get a lease. The phone MAC is auto-detected (connected/paired) unless
+        set in config. Tries bt-network (bluez-tools) then D-Bus, then dhclient."""
+        if not self._auto_pan:
             return
+        if not self._phone_mac:
+            self._phone_mac = self._auto_mac()      # auto-detect the paired phone
+            if not self._phone_mac:
+                return                              # nothing paired yet
         ip = self._iface_ip()
         if ip:
             self._pan_ip = ip
@@ -206,7 +223,7 @@ class BTLink(plugins.Plugin):
         try:
             if self._pan_ip:
                 msg = self._pan_ip                      # we're on the phone's net
-            elif self._phone_mac and self._auto_pan:
+            elif self._auto_pan:
                 msg = "code %s / BT.." % self._code
             elif self._require_code and not self._unlocked:
                 msg = "code %s" % self._code
