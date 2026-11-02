@@ -1,0 +1,62 @@
+name: Build iOS app (unsigned IPA)
+
+# Builds the Pwn Companion iOS app on a GitHub-hosted macOS runner and uploads
+# an UNSIGNED .ipa as an artifact. Install it on a JAILBROKEN iPhone (TrollStore
+# / AppSync) — unsigned installs need jailbreak. Run manually from the Actions
+# tab ("Run workflow"), or it runs on pushes that touch the app.
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - "companion-app/**"
+      - ".github/workflows/ios-build.yml"
+
+jobs:
+  build:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Xcode version
+        run: xcodebuild -version
+
+      - name: Install XcodeGen
+        run: brew install xcodegen
+
+      - name: Generate Xcode project
+        working-directory: companion-app
+        run: xcodegen generate
+
+      - name: Build (no code signing)
+        working-directory: companion-app
+        run: |
+          set -o pipefail
+          xcodebuild \
+            -project PwnCompanion.xcodeproj \
+            -scheme PwnCompanion \
+            -configuration Release \
+            -sdk iphoneos \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            CODE_SIGNING_REQUIRED=NO \
+            CODE_SIGN_IDENTITY="" \
+            build
+
+      - name: Package unsigned IPA
+        working-directory: companion-app
+        run: |
+          APP=$(find build/Build/Products/Release-iphoneos -maxdepth 1 -name '*.app' | head -1)
+          echo "Packaging: $APP"
+          test -n "$APP"
+          rm -rf Payload PwnCompanion-unsigned.ipa
+          mkdir Payload
+          cp -R "$APP" Payload/
+          zip -qry PwnCompanion-unsigned.ipa Payload
+          ls -la PwnCompanion-unsigned.ipa
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: PwnCompanion-unsigned-ipa
+          path: companion-app/PwnCompanion-unsigned.ipa
+          if-no-files-found: error
