@@ -1,41 +1,26 @@
 # btlink config. Copy into /etc/pwnagotchi/config.toml.
 #
-# Makes pwnagotchi reachable by the Pwn Companion app over Bluetooth, secured by
-# the standard iPhone pairing code + an optional on-screen link code.
+# pwnagotchi raises ITS OWN secured Wi-Fi hotspot for the Companion app. The phone
+# joins it by typing the password shown FULL-SCREEN on the e-ink. The app then
+# connects to the device at the hotspot IP (default 192.168.50.1:8080).
 #
-# Steps:
-#   1) enable this plugin, restart pwnagotchi
-#   2) iPhone: Settings -> Bluetooth -> tap "pwnagotchi" -> confirm the code
-#   3) iPhone: turn ON Personal Hotspot (so the Pi can tether over Bluetooth)
-#   4) app: Settings -> Bluetooth, set the Pi's BT-PAN IP (usually 172.20.10.x),
-#      then send the on-screen link code once.
+# iPhone can't join a Pi's Bluetooth network, so "phone -> Pi + password" is Wi-Fi.
+# ONE radio: while the hotspot is up, hunting is PAUSED. Enable to use the app,
+# disable to hunt.
 #
-# Cable (USB 10.0.0.2:8080) works with NO plugin — pick "Кабель" in the app.
+# Needs hostapd + dnsmasq on the device.
 
 main.plugins.btlink.enabled = true
 
-# Bluetooth name shown when pairing:
-# main.plugins.btlink.alias = "pwnagotchi"
+# Wi-Fi name the phone sees:
+# main.plugins.btlink.ap_ssid = "pwn-Ki213"
 
-# Show up for pairing (turn off once paired if you want it hidden):
-# main.plugins.btlink.discoverable = true
+# Password: leave "" to generate a stable one (shown on screen, saved so it stays
+# the same across reboots), or set your own (min 8 chars):
+# main.plugins.btlink.ap_pass = ""
 
-# Extra lock: the app must send the on-screen code once before it can drive the
-# Pi. Set false to rely only on Bluetooth pairing.
-# main.plugins.btlink.require_code = true
+# Hotspot IP — put <ip>:8080 in the app:
+# main.plugins.btlink.ap_ip = "192.168.50.1"
 
-# Fixed code instead of a random one each boot (leave "" for random):
-# main.plugins.btlink.code = ""
-
-# Where to draw "BT: code ..." on the e-ink (x,y):
-# main.plugins.btlink.position = "0,95"
-
-# --- BT-PAN tether (our own replacement for bt-tether) ---
-# Set your iPhone's Bluetooth MAC and btlink will dial its Personal Hotspot over
-# Bluetooth, bring up bnep0 and get an IP (shown on the e-ink). Needs the phone
-# paired once (step 3) + Personal Hotspot ON. Find the MAC on the Pi:
-#   sudo bluetoothctl --timeout 10 scan on   (then: sudo bluetoothctl devices)
-# For the bt-network path also: sudo apt install -y bluez-tools
-# main.plugins.btlink.phone_mac = "AA:BB:CC:DD:EE:FF"
-# main.plugins.btlink.auto_pan  = true
-# main.plugins.btlink.pan_iface = "bnep0"
+# Wi-Fi channel:
+# main.plugins.btlink.channel = 6

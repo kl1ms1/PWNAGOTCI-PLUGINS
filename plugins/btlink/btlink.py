@@ -1,280 +1,253 @@
 """
-btlink — one plugin to pair the Pwn Companion app over Bluetooth (or cable).
+btlink — pwnagotchi raises ITS OWN secured Wi-Fi hotspot for the Companion app.
 
-What it does (reliable, testable):
-  • Makes the pwnagotchi Bluetooth DISCOVERABLE + PAIRABLE so your iPhone can
-    pair it for Bluetooth tethering (BT-PAN). iOS pairing shows a 6-digit code
-    on BOTH devices that you confirm once — that's the "no stranger connects"
-    security, built into Bluetooth itself.
-  • Shows a short LINK CODE and the BT status on the e-ink.
-  • Exposes a tiny web gate: the app sends the code once to "unlock", so even
-    over the shared network nobody without the on-screen code can drive the Pi.
+The phone joins the pwnagotchi's Wi-Fi by typing the password that is shown
+FULL-SCREEN on the e-ink (so nobody without the password can connect). Then the
+app reaches the device at the hotspot IP (default 192.168.50.1).
 
-What you still do once (can't be automated from the Pi reliably):
-  • On the iPhone: Settings → Bluetooth → tap "pwnagotchi" → confirm the code.
-  • Turn ON Personal Hotspot so the Pi can join over Bluetooth (BT-PAN). The Pi
-    then gets an IP like 172.20.10.x — put that in the app (Bluetooth mode).
+Why Wi-Fi and not Bluetooth: an iPhone cannot join a Raspberry Pi's Bluetooth
+network (iOS doesn't allow it), so "phone connects to the Pi + password" is only
+possible over Wi-Fi.
 
-Transport choice (Bluetooth vs cable) lives in the APP settings; this plugin
-just makes the Bluetooth side reachable and secured. Cable (USB 10.0.0.2) needs
-no plugin at all.
+⚠️ ONE radio: while the hotspot is up, hunting is PAUSED. Enable this plugin when
+you want to use the app; disable it to hunt. (A physical switch can automate this
+later.)
 
 Config (/etc/pwnagotchi/config.toml):
-  main.plugins.btlink.enabled     = true
-  main.plugins.btlink.alias       = "pwnagotchi"   # Bluetooth name
-  main.plugins.btlink.discoverable = true          # show up for pairing
-  main.plugins.btlink.require_code = true          # app must send the code once
-  main.plugins.btlink.code        = ""             # fixed code, or "" = random per boot
-  main.plugins.btlink.position    = "0,95"         # where to draw on the e-ink
+  main.plugins.btlink.enabled = true
+  main.plugins.btlink.ap_ssid = "pwn-Ki213"    # Wi-Fi name
+  main.plugins.btlink.ap_pass = ""             # fixed pass, or "" = generated once
+  main.plugins.btlink.ap_ip   = "192.168.50.1" # app connects here
+  main.plugins.btlink.channel = 6
 
-Web:  http://<ip>:8080/plugins/btlink/?code=123456   -> {"ok": true/false}
-Own device only.
+Needs hostapd + dnsmasq on the device (usually present). Own device only.
 """
 
 import logging
+import os
 import random
+import string
 import subprocess
 import time
 
 import pwnagotchi.plugins as plugins
 
 try:
-    from pwnagotchi.ui.components import LabeledValue
-    from pwnagotchi.ui.view import BLACK
+    from pwnagotchi.ui.components import Widget as _Widget
     import pwnagotchi.ui.fonts as fonts
 except Exception:
-    LabeledValue = None
-    BLACK = 0x00
+    _Widget = object
+    fonts = None
+
+
+class _APWidget(_Widget):
+    def __init__(self, plugin):
+        try:
+            super().__init__((0, 0))
+        except Exception:
+            pass
+        self.xy = (0, 0)
+        self._p = plugin
+
+    def draw(self, canvas, drawer):
+        try:
+            self._p._draw(canvas, drawer)
+        except Exception:
+            pass
 
 
 class BTLink(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "0.2.0"
+    __version__ = "0.3.0"
     __license__ = "MIT"
-    __description__ = "Bluetooth link for the Pwn Companion app: PAN tether + on-screen code (replaces bt-tether)."
+    __description__ = "pwnagotchi's own secured Wi-Fi hotspot for the Companion app (full-screen password)."
 
     def __init__(self):
-        self._alias = "pwnagotchi"
-        self._discoverable = True
-        self._require_code = True
-        self._fixed = ""
-        self._pos = (0, 95)
-        self._code = ""
-        self._unlocked = False
-        self._bt_ok = None
-        # BT-PAN (our own replacement for bt-tether): dial the phone's hotspot
-        self._phone_mac = ""
-        self._auto_pan = True
-        self._pan_iface = "bnep0"
-        self._pan_ip = ""
-        self._last_pan = 0.0
-        self._pan_proc = None
+        self._ssid = "pwnagotchi"
+        self._pass = ""
+        self._ip = "192.168.50.1"
+        self._channel = 6
+        self._iface = "wlan0"
+        self._dir = "/root/.btlink"
+        self._hostapd_conf = "/tmp/btlink_hostapd.conf"
+        self._dnsmasq_conf = "/tmp/btlink_dnsmasq.conf"
+        self._procs = []
+        self._up = False
+        self._added = False
+        self._f_small = None
+        self._f_big = None
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
         o = self.options or {}
-        self._alias = o.get("alias", self._alias)
-        self._discoverable = bool(o.get("discoverable", True))
-        self._require_code = bool(o.get("require_code", True))
-        self._fixed = str(o.get("code", "") or "")
-        pos = o.get("position", "0,95")
+        self._ssid = o.get("ap_ssid", "pwnagotchi")
+        self._pass = str(o.get("ap_pass", "") or "")
+        self._ip = o.get("ap_ip", self._ip)
+        self._iface = o.get("ap_iface", self._iface)
         try:
-            x, y = str(pos).split(",")
-            self._pos = (int(x), int(y))
+            self._channel = int(o.get("channel", 6))
+        except Exception:
+            self._channel = 6
+        os.makedirs(self._dir, exist_ok=True)
+        if not self._pass:
+            self._pass = self._load_or_make_pass()
+        logging.info("[btlink] loaded (ssid=%s)", self._ssid)
+
+    def _load_or_make_pass(self):
+        pf = os.path.join(self._dir, "pass.txt")
+        try:
+            with open(pf) as f:
+                p = f.read().strip()
+                if len(p) >= 8:
+                    return p
         except Exception:
             pass
-        self._phone_mac = str(o.get("phone_mac", "") or "").upper().strip()
-        self._auto_pan = bool(o.get("auto_pan", True))
-        self._pan_iface = o.get("pan_iface", self._pan_iface)
-        logging.info("[btlink] loaded (phone=%s)", self._phone_mac or "-")
+        # readable 8-char password (no ambiguous chars)
+        alpha = "abcdefghijkmnpqrstuvwxyz23456789"
+        p = "".join(random.choice(alpha) for _ in range(8))
+        try:
+            with open(pf, "w") as f:
+                f.write(p)
+        except Exception:
+            pass
+        return p
 
     def _sh(self, args, timeout=10):
         try:
             r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
-            return r.returncode == 0, (r.stdout or "") + (r.stderr or "")
+            return r.returncode == 0
         except Exception as e:
             logging.debug("[btlink] cmd %s: %s", args, e)
-            return False, str(e)
-
-    def _gen_code(self):
-        if self._fixed:
-            return str(self._fixed)
-        return "%06d" % random.randint(0, 999999)
-
-    def on_ready(self, agent):
-        self._code = self._gen_code()
-        self._unlocked = not self._require_code
-        ok, _ = self._sh(["bluetoothctl", "show"])
-        self._bt_ok = ok
-        try:
-            self._sh(["bluetoothctl", "power", "on"])
-            self._sh(["bluetoothctl", "system-alias", self._alias])
-            if self._discoverable:
-                self._sh(["bluetoothctl", "discoverable", "on"])
-                self._sh(["bluetoothctl", "pairable", "on"])
-            logging.info("[btlink] ready (bt=%s, code=%s)", self._bt_ok, self._code)
-        except Exception:
-            logging.exception("[btlink] bluetooth setup failed")
-
-    # --- BT-PAN: join the phone's Bluetooth hotspot (replaces bt-tether) ----
-    def _iface_ip(self):
-        ok, out = self._sh(["ip", "-4", "addr", "show", self._pan_iface])
-        if not ok:
-            return ""
-        for tok in out.split():
-            if tok.count(".") == 3 and "/" in tok:
-                return tok.split("/")[0]
-        return ""
-
-    def _auto_mac(self):
-        """Pick the phone automatically: a currently-connected device first,
-        else a paired one — so you never have to type the MAC."""
-        for args in (["devices", "Connected"], ["paired-devices"], ["devices", "Paired"]):
-            ok, out = self._sh(["bluetoothctl"] + args)
-            if not ok:
-                continue
-            for line in out.splitlines():
-                p = line.split()
-                if len(p) >= 2 and p[0] == "Device":
-                    return p[1].upper()
-        return ""
-
-    def _ensure_pan(self):
-        """If we're not on the phone's network yet, connect the Bluetooth PAN
-        and get a lease. The phone MAC is auto-detected (connected/paired) unless
-        set in config. Tries bt-network (bluez-tools) then D-Bus, then dhclient."""
-        if not self._auto_pan:
-            return
-        if not self._phone_mac:
-            self._phone_mac = self._auto_mac()      # auto-detect the paired phone
-            if not self._phone_mac:
-                return                              # nothing paired yet
-        ip = self._iface_ip()
-        if ip:
-            self._pan_ip = ip
-            return
-        mac = self._phone_mac
-        self._sh(["bluetoothctl", "trust", mac])
-        self._sh(["bluetoothctl", "connect", mac], timeout=15)
-        # 1) dbus-send — part of dbus, ALWAYS installed, no internet/apt needed
-        brought_up = self._pan_via_dbus_send(mac)
-        # 2) bt-network CLI (bluez-tools), only if present
-        if not brought_up:
-            try:
-                import shutil
-                if shutil.which("bt-network"):
-                    import subprocess
-                    if self._pan_proc is None or self._pan_proc.poll() is not None:
-                        self._pan_proc = subprocess.Popen(
-                            ["bt-network", "-c", mac, "nap"],
-                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                    brought_up = True
-            except Exception:
-                logging.debug("[btlink] bt-network failed")
-        # 3) python-dbus, if the module happens to be available
-        if not brought_up:
-            brought_up = self._pan_via_dbus(mac)
-        time.sleep(3)
-        self._sh(["dhclient", "-1", self._pan_iface], timeout=25)
-        ip = self._iface_ip()
-        if ip:
-            self._pan_ip = ip
-            logging.info("[btlink] PAN up: %s on %s", ip, self._pan_iface)
-        else:
-            logging.info("[btlink] PAN not up yet (phone hotspot on? paired?)")
-
-    def _pan_via_dbus_send(self, mac):
-        """Bring up the PAN with dbus-send (ships with dbus — no apt, no WiFi)."""
-        dev = "dev_" + mac.replace(":", "_")
-        ok, out = self._sh([
-            "dbus-send", "--system", "--print-reply", "--dest=org.bluez",
-            "/org/bluez/hci0/" + dev, "org.bluez.Network1.Connect", "string:nap",
-        ], timeout=20)
-        if not ok:
-            logging.debug("[btlink] dbus-send PAN: %s", out[-120:] if out else "")
-        return ok
-
-    def _pan_via_dbus(self, mac):
-        try:
-            import dbus
-            bus = dbus.SystemBus()
-            adapter_path = "/org/bluez/hci0"
-            dev = "dev_" + mac.replace(":", "_")
-            path = adapter_path + "/" + dev
-            obj = bus.get_object("org.bluez", path)
-            net = dbus.Interface(obj, "org.bluez.Network1")
-            net.Connect("nap")
-            return True
-        except Exception as e:
-            logging.debug("[btlink] dbus PAN: %s", e)
             return False
 
-    def on_epoch(self, agent, epoch, epoch_data):
-        now = time.time()
-        if now - self._last_pan < 20:
-            return
-        self._last_pan = now
-        try:
-            self._ensure_pan()
-        except Exception:
-            logging.exception("[btlink] ensure_pan")
+    def on_ready(self, agent):
+        self._raise_ap()
 
-    # --- e-ink -------------------------------------------------------------
-    def on_ui_setup(self, ui):
-        if LabeledValue is None:
+    # --- the hotspot -------------------------------------------------------
+    def _raise_ap(self):
+        if self._up:
+            return
+        if len(self._pass) < 8:
+            logging.warning("[btlink] password <8 chars — not raising AP")
             return
         try:
-            ui.add_element("btlink", LabeledValue(
-                color=BLACK, label="BT", value="...",
-                position=self._pos,
-                label_font=getattr(fonts, "Bold", None),
-                text_font=getattr(fonts, "Small", None)))
+            self._sh(["/usr/bin/monstop"])
+            self._sh(["rfkill", "unblock", "wifi"])
+            self._sh(["ip", "link", "set", self._iface, "down"])
+            self._sh(["ip", "addr", "flush", "dev", self._iface])
+            self._sh(["ip", "addr", "add", self._ip + "/24", "dev", self._iface])
+            self._sh(["ip", "link", "set", self._iface, "up"])
+            net = self._ip.rsplit(".", 1)[0]
+            with open(self._hostapd_conf, "w") as f:
+                f.write("interface=%s\ndriver=nl80211\nssid=%s\nhw_mode=g\nchannel=%d\n"
+                        "auth_algs=1\nwpa=2\nwpa_passphrase=%s\nwpa_key_mgmt=WPA-PSK\n"
+                        "rsn_pairwise=CCMP\nignore_broadcast_ssid=0\n"
+                        % (self._iface, self._ssid, self._channel, self._pass))
+            with open(self._dnsmasq_conf, "w") as f:
+                f.write("interface=%s\nbind-interfaces\nexcept-interface=lo\n"
+                        "dhcp-range=%s.10,%s.100,255.255.255.0,12h\n"
+                        "dhcp-option=3,%s\ndhcp-option=6,%s\nno-resolv\nport=0\n"
+                        % (self._iface, net, net, self._ip, self._ip))
+            hp = subprocess.Popen(["hostapd", self._hostapd_conf],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            time.sleep(1.5)
+            dm = subprocess.Popen(["dnsmasq", "-C", self._dnsmasq_conf, "-k"],
+                                  stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self._procs = [hp, dm]
+            self._up = True
+            logging.info("[btlink] hotspot up: %s @ %s", self._ssid, self._ip)
         except Exception:
-            logging.debug("[btlink] could not add ui element")
+            logging.exception("[btlink] raise AP failed")
+            self._ap_down()
+
+    def _ap_down(self):
+        for p in self._procs:
+            try:
+                p.terminate()
+            except Exception:
+                pass
+        self._procs = []
+        self._sh(["pkill", "-f", self._hostapd_conf])
+        self._sh(["pkill", "-f", self._dnsmasq_conf])
+        self._sh(["ip", "addr", "flush", "dev", self._iface])
+        self._sh(["ip", "link", "set", self._iface, "down"])
+        self._sh(["/usr/bin/monstart"])
+        self._up = False
+
+    # --- full-screen password on the e-ink ---------------------------------
+    def on_ui_setup(self, ui):
+        if _Widget is object:
+            return
+        try:
+            ui.add_element("btlink", _APWidget(self))
+            self._added = True
+        except Exception:
+            logging.debug("[btlink] could not add widget")
 
     def on_ui_update(self, ui):
+        if not self._added:
+            return
         try:
-            if self._pan_ip:
-                msg = self._pan_ip                      # we're on the phone's net
-            elif self._auto_pan:
-                msg = "code %s / BT.." % self._code
-            elif self._require_code and not self._unlocked:
-                msg = "code %s" % self._code
-            elif self._unlocked:
-                msg = "linked"
-            else:
-                msg = "pair ON"
-            ui.set("btlink", msg)
+            st = getattr(getattr(ui, "_state", None), "_state", None)
+            if isinstance(st, dict) and "btlink" in st:
+                st["btlink"] = st.pop("btlink")     # draw last (on top)
         except Exception:
             pass
+
+    @staticmethod
+    def _tw(drawer, text, font):
+        try:
+            return drawer.textlength(text, font=font)
+        except Exception:
+            try:
+                b = font.getbbox(text)
+                return b[2] - b[0]
+            except Exception:
+                return len(text) * 8
+
+    def _fonts(self):
+        if self._f_small is not None or fonts is None:
+            return
+        self._f_small = getattr(fonts, "Small", None)
+        self._f_big = (getattr(fonts, "Huge", None)
+                       or getattr(fonts, "Bold", None) or self._f_small)
+
+    def _draw(self, canvas, drawer):
+        self._fonts()
+        if self._f_small is None:
+            return
+        try:
+            W, H = canvas.size
+        except Exception:
+            W, H = 250, 122
+        drawer.rectangle((0, 0, W, H), fill=0xFF)
+        # header: Wi-Fi name
+        drawer.rectangle((0, 0, W, 16), fill=0x00)
+        top = "WiFi: %s" % self._ssid
+        drawer.text(((W - self._tw(drawer, top, self._f_small)) / 2, 2), top,
+                    font=self._f_small, fill=0xFF)
+        # label
+        lbl = "пароль / password"
+        drawer.text(((W - self._tw(drawer, lbl, self._f_small)) / 2, 22), lbl,
+                    font=self._f_small, fill=0x00)
+        # the password, as big as fits (fall back to small if too wide)
+        ff = self._f_big
+        if ff is None or self._tw(drawer, self._pass, ff) > W - 16:
+            ff = self._f_small
+        pw_w = self._tw(drawer, self._pass, ff)
+        drawer.text(((W - pw_w) / 2, 44), self._pass, font=ff, fill=0x00)
+        # footer: where to point the app
+        foot = "app: %s:8080" % self._ip if self._up else "AP down — see log"
+        drawer.rectangle((0, H - 16, W, H), fill=0x00)
+        drawer.text(((W - self._tw(drawer, foot, self._f_small)) / 2, H - 15), foot,
+                    font=self._f_small, fill=0xFF)
 
     def on_unload(self, ui):
         try:
-            if self._pan_proc is not None:
-                self._pan_proc.terminate()
-        except Exception:
-            pass
-        try:
-            self._sh(["bluetoothctl", "discoverable", "off"])
+            self._ap_down()
         except Exception:
             pass
         try:
             ui.remove_element("btlink")
         except Exception:
             pass
-
-    # --- web gate ----------------------------------------------------------
-    def on_webhook(self, path, request):
-        from flask import jsonify
-        code = ""
-        try:
-            code = (request.args.get("code") or "").strip()
-        except Exception:
-            code = ""
-        if not self._require_code:
-            return jsonify(ok=True, linked=True, require_code=False)
-        if code and code == self._code:
-            self._unlocked = True
-            return jsonify(ok=True, linked=True)
-        return jsonify(ok=False, linked=self._unlocked,
-                       msg="Enter the code shown on the pwnagotchi screen")

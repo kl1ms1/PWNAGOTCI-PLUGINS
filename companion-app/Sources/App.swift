@@ -31,7 +31,7 @@ final class ConnectionStore: ObservableObject {
 
     init() {
         let d = UserDefaults.standard
-        host = d.string(forKey: "host") ?? "172.20.10.6"
+        host = d.string(forKey: "host") ?? "192.168.50.1"
         port = d.string(forKey: "port") ?? "8080"
         user = d.string(forKey: "user") ?? "changeme"
         pass = d.string(forKey: "pass") ?? "changeme"

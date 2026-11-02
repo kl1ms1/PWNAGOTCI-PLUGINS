@@ -418,7 +418,7 @@ struct SettingsView: View {
                     }.listRowBackground(Color.white.opacity(0.06))
 
                     Section("Как подключиться") {
-                        Text("iPhone не умеет USB-ethernet, поэтому только Bluetooth (или общий Wi-Fi).\nВключи на Pi плагин btlink — он входит в Bluetooth-точку телефона, и показывает свой IP (обычно 172.20.10.x) на экране. Впиши его сюда. Логин/пароль — из config.toml (ui.web.username / ui.web.password).")
+                        Text("Включи на Pi плагин btlink — pwnagotchi поднимет свою WiFi-сеть, а пароль покажет на весь экран. Подключи айфон к этой WiFi (введи пароль с экрана), потом впиши сюда IP точки (по умолчанию 192.168.50.1), порт 8080. Логин/пароль веб-интерфейса — из config.toml (ui.web.username / ui.web.password).")
                             .font(.footnote).foregroundStyle(.secondary)
                     }.listRowBackground(Color.white.opacity(0.06))
                 }
