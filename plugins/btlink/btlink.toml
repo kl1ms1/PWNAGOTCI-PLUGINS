@@ -1,0 +1,31 @@
+# btlink config. Copy into /etc/pwnagotchi/config.toml.
+#
+# Makes pwnagotchi reachable by the Pwn Companion app over Bluetooth, secured by
+# the standard iPhone pairing code + an optional on-screen link code.
+#
+# Steps:
+#   1) enable this plugin, restart pwnagotchi
+#   2) iPhone: Settings -> Bluetooth -> tap "pwnagotchi" -> confirm the code
+#   3) iPhone: turn ON Personal Hotspot (so the Pi can tether over Bluetooth)
+#   4) app: Settings -> Bluetooth, set the Pi's BT-PAN IP (usually 172.20.10.x),
+#      then send the on-screen link code once.
+#
+# Cable (USB 10.0.0.2:8080) works with NO plugin — pick "Кабель" in the app.
+
+main.plugins.btlink.enabled = true
+
+# Bluetooth name shown when pairing:
+# main.plugins.btlink.alias = "pwnagotchi"
+
+# Show up for pairing (turn off once paired if you want it hidden):
+# main.plugins.btlink.discoverable = true
+
+# Extra lock: the app must send the on-screen code once before it can drive the
+# Pi. Set false to rely only on Bluetooth pairing.
+# main.plugins.btlink.require_code = true
+
+# Fixed code instead of a random one each boot (leave "" for random):
+# main.plugins.btlink.code = ""
+
+# Where to draw "BT: code ..." on the e-ink (x,y):
+# main.plugins.btlink.position = "0,95"
