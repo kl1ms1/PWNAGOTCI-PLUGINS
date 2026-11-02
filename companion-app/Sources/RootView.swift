@@ -99,6 +99,7 @@ struct DashView: View {
     @State private var image: UIImage?
     @State private var status = "Подключаюсь…"
     @State private var online = false
+    @State private var showWeb = false
 
     var body: some View {
         NavigationStack {
@@ -133,13 +134,24 @@ struct DashView: View {
                                     }
                                 }
                                 .frame(height: 185)
-                                Button {
-                                    Task { await refresh() }
-                                } label: {
-                                    Label("Обновить", systemImage: "arrow.clockwise")
-                                        .frame(maxWidth: .infinity)
+                                HStack(spacing: 10) {
+                                    Button {
+                                        Task { await refresh() }
+                                    } label: {
+                                        Label("Обновить", systemImage: "arrow.clockwise")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.borderedProminent)
+
+                                    Button {
+                                        showWeb = true
+                                    } label: {
+                                        Label("Веб-морда", systemImage: "globe")
+                                            .frame(maxWidth: .infinity)
+                                    }
+                                    .buttonStyle(.bordered)
+                                    .disabled(conn.baseURL == nil)
                                 }
-                                .buttonStyle(.borderedProminent)
                             }
                         }
                     }
@@ -148,6 +160,11 @@ struct DashView: View {
             }
             .navigationTitle("Dash")
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .sheet(isPresented: $showWeb) {
+                if let url = conn.baseURL {
+                    WebUISheet(url: url, user: conn.user, pass: conn.pass)
+                }
+            }
         }
         .task { await loop() }
     }
