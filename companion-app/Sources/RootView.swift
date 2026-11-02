@@ -123,9 +123,7 @@ struct RootView: View {
         TabView {
             DashView().tabItem { Label("Dash", systemImage: "chart.bar.fill") }
             PwndexView().tabItem { Label("Pwndex", systemImage: "list.star") }
-            PlaceholderView(title: "Events", systemImage: "list.bullet.rectangle",
-                            note: "Живой лог (WebSocket) — скоро")
-                .tabItem { Label("Events", systemImage: "list.bullet") }
+            MapView().tabItem { Label("Карта", systemImage: "map.fill") }
             ControlView().tabItem { Label("Control", systemImage: "wrench.and.screwdriver.fill") }
             SettingsView().tabItem { Label("Settings", systemImage: "gearshape.fill") }
         }
