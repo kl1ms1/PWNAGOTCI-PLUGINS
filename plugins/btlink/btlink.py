@@ -156,20 +156,22 @@ class BTLink(plugins.Plugin):
         mac = self._phone_mac
         self._sh(["bluetoothctl", "trust", mac])
         self._sh(["bluetoothctl", "connect", mac], timeout=15)
-        # 1) bt-network CLI (bluez-tools), if present
-        brought_up = False
-        try:
-            import shutil
-            if shutil.which("bt-network"):
-                import subprocess
-                if self._pan_proc is None or self._pan_proc.poll() is not None:
-                    self._pan_proc = subprocess.Popen(
-                        ["bt-network", "-c", mac, "nap"],
-                        stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
-                brought_up = True
-        except Exception:
-            logging.debug("[btlink] bt-network failed")
-        # 2) D-Bus org.bluez Network1.Connect("nap")
+        # 1) dbus-send — part of dbus, ALWAYS installed, no internet/apt needed
+        brought_up = self._pan_via_dbus_send(mac)
+        # 2) bt-network CLI (bluez-tools), only if present
+        if not brought_up:
+            try:
+                import shutil
+                if shutil.which("bt-network"):
+                    import subprocess
+                    if self._pan_proc is None or self._pan_proc.poll() is not None:
+                        self._pan_proc = subprocess.Popen(
+                            ["bt-network", "-c", mac, "nap"],
+                            stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+                    brought_up = True
+            except Exception:
+                logging.debug("[btlink] bt-network failed")
+        # 3) python-dbus, if the module happens to be available
         if not brought_up:
             brought_up = self._pan_via_dbus(mac)
         time.sleep(3)
@@ -180,6 +182,17 @@ class BTLink(plugins.Plugin):
             logging.info("[btlink] PAN up: %s on %s", ip, self._pan_iface)
         else:
             logging.info("[btlink] PAN not up yet (phone hotspot on? paired?)")
+
+    def _pan_via_dbus_send(self, mac):
+        """Bring up the PAN with dbus-send (ships with dbus — no apt, no WiFi)."""
+        dev = "dev_" + mac.replace(":", "_")
+        ok, out = self._sh([
+            "dbus-send", "--system", "--print-reply", "--dest=org.bluez",
+            "/org/bluez/hci0/" + dev, "org.bluez.Network1.Connect", "string:nap",
+        ], timeout=20)
+        if not ok:
+            logging.debug("[btlink] dbus-send PAN: %s", out[-120:] if out else "")
+        return ok
 
     def _pan_via_dbus(self, mac):
         try:
