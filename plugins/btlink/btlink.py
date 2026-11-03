@@ -95,11 +95,18 @@ class BTLink(plugins.Plugin):
 
     def on_ready(self, agent):
         try:
+            # pwnagotchi images often ship Bluetooth OFF — bring the stack up first
+            self._sh(["rfkill", "unblock", "bluetooth"])
+            self._sh(["systemctl", "start", "bluetooth"])
+            self._sh(["hciconfig", "hci0", "up"])
+            time.sleep(1)
             self._sh(["bluetoothctl", "power", "on"])
             self._sh(["bluetoothctl", "system-alias", self._alias])
             self._sh(["bluetoothctl", "discoverable", "on"])
             self._sh(["bluetoothctl", "pairable", "on"])
             self._sh(["bluetoothctl", "discoverable-timeout", "0"])
+            ok, out = self._sh(["bluetoothctl", "show"])
+            logging.info("[btlink] bt up? %s", "Powered: yes" in out)
         except Exception:
             logging.exception("[btlink] bt setup")
         self._start_agent()
