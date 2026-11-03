@@ -54,7 +54,7 @@ class _LinkWidget(_Widget):
 
 class Companion(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "1.6.0"
+    __version__ = "1.7.0"
     __license__ = "MIT"
     __description__ = "One plugin for the Pwn Companion app: Bluetooth + BLE + JSON API."
 
@@ -479,6 +479,23 @@ class Companion(plugins.Plugin):
     def _pcaps(self):
         return len(self._pcap_list())
 
+    def _battery(self):
+        """UPS-Lite (MAX17040 @ 0x36): register 4 = capacity (word, byte-swapped)."""
+        try:
+            r = subprocess.run(["i2cget", "-y", "1", "0x36", "4", "w"],
+                               capture_output=True, text=True, timeout=4)
+            raw = (r.stdout or "").strip()
+            if not raw.startswith("0x"):
+                return None
+            val = int(raw, 16)
+            swapped = ((val & 0xFF) << 8) | (val >> 8)
+            pct = swapped / 256.0
+            if pct <= 0 or pct > 130:
+                return None
+            return round(min(pct, 100.0), 1)
+        except Exception:
+            return None
+
     def _dex(self):
         try:
             with open(self._dex_f, encoding="utf-8") as f:
@@ -507,7 +524,7 @@ class Companion(plugins.Plugin):
             "temp": self._read_temp(), "cpu": self._read_cpu(), "mem": self._read_mem(),
             "sd_free": self._sd_free(), "pcaps": self._pcaps(), "networks": len(dex),
             "cracked": sum(1 for e in dex.values() if e.get("pw")), "shakes": self._shakes,
-            "bt": self._status_text(),
+            "bt": self._status_text(), "battery": self._battery(),
         }
 
     def _pwndex(self):

@@ -129,6 +129,16 @@ func uptimeStr(_ s: Int?) -> String {
     return "\(m)m"
 }
 
+func batteryIcon(_ pct: Double) -> String {
+    switch pct {
+    case ..<12: return "battery.0"
+    case ..<30: return "battery.25"
+    case ..<60: return "battery.50"
+    case ..<85: return "battery.75"
+    default: return "battery.100"
+    }
+}
+
 // MARK: - Root
 
 struct RootView: View {
@@ -182,6 +192,10 @@ struct DashView: View {
                                     Text("· \((st.mode ?? "—").uppercased()) · \(uptimeStr(st.uptime))")
                                         .font(.caption).foregroundStyle(.secondary)
                                     Spacer()
+                                    if let b = st.battery {
+                                        Image(systemName: batteryIcon(b)).font(.caption)
+                                        Text("\(Int(b))%").font(.caption.weight(.semibold))
+                                    }
                                 }
                             }
                         }
@@ -195,6 +209,7 @@ struct DashView: View {
                             StatTile(label: "CPU", value: st.cpu.map { String(format: "%.0f%%", $0) } ?? "—")
                             StatTile(label: "RAM", value: st.mem.map { String(format: "%.0f%%", $0) } ?? "—")
                             StatTile(label: "SD GB", value: st.sd_free.map { String(format: "%.0f", $0) } ?? "—")
+                            StatTile(label: "battery", value: st.battery.map { "\(Int($0))%" } ?? "—")
                         }
 
                         if cpuHist.count > 1 {
@@ -217,27 +232,13 @@ struct DashView: View {
                             }.buttonStyle(.bordered).disabled(conn.baseURL == nil || conn.demo)
                         }
 
-                        HStack(spacing: 10) {
-                            NavigationLink { EventsView() } label: {
-                                Label("Events", systemImage: "list.bullet.rectangle")
-                                    .frame(maxWidth: .infinity)
-                            }.buttonStyle(.bordered)
-                            NavigationLink { FilesView() } label: {
-                                Label("Files", systemImage: "folder")
-                                    .frame(maxWidth: .infinity)
-                            }.buttonStyle(.bordered)
-                        }
+                        NavigationLink { EventsView() } label: {
+                            Label("Recent activity", systemImage: "list.bullet.rectangle")
+                                .frame(maxWidth: .infinity)
+                        }.buttonStyle(.bordered)
 
-                        HStack(spacing: 10) {
-                            NavigationLink { CommandsView() } label: {
-                                Label("Commands", systemImage: "terminal")
-                                    .frame(maxWidth: .infinity)
-                            }.buttonStyle(.bordered)
-                            NavigationLink { PluginsView() } label: {
-                                Label("Plugins", systemImage: "puzzlepiece.extension")
-                                    .frame(maxWidth: .infinity)
-                            }.buttonStyle(.bordered)
-                        }
+                        Text("All tools are on the Control tab")
+                            .font(.caption2).foregroundStyle(.secondary)
                     }
                     .padding()
                 }
@@ -285,13 +286,19 @@ struct PwndexView: View {
     @State private var loaded = false
     @State private var editing: NetItem?
     @State private var query = ""
+    @State private var filter = "all"   // all | cracked | open
 
     private var filtered: [NetItem] {
-        guard !query.isEmpty else { return items }
-        let q = query.lowercased()
-        return items.filter {
-            $0.ssid.lowercased().contains(q) || $0.mac.lowercased().contains(q)
-                || $0.pw.lowercased().contains(q)
+        items.filter { n in
+            switch filter {
+            case "cracked": if n.pw.isEmpty { return false }
+            case "open": if !n.pw.isEmpty { return false }
+            default: break
+            }
+            guard !query.isEmpty else { return true }
+            let q = query.lowercased()
+            return n.ssid.lowercased().contains(q) || n.mac.lowercased().contains(q)
+                || n.pw.lowercased().contains(q)
         }
     }
 
@@ -300,6 +307,13 @@ struct PwndexView: View {
             ZStack {
                 ThemeBG()
                 List {
+                    Picker("", selection: $filter) {
+                        Text("All").tag("all")
+                        Text("Cracked").tag("cracked")
+                        Text("Open").tag("open")
+                    }
+                    .pickerStyle(.segmented)
+                    .listRowBackground(Color.clear)
                     ForEach(filtered) { it in
                         Button { editing = it } label: {
                             HStack {
@@ -436,6 +450,8 @@ struct ControlView: View {
     @State private var confirm: (title: String, cmd: String)?
     @State private var exportText = ""
     @State private var showExport = false
+    @State private var st = DeviceStatus()
+    @State private var online = false
 
     var body: some View {
         NavigationStack {
@@ -443,6 +459,29 @@ struct ControlView: View {
                 ThemeBG()
                 ScrollView {
                     VStack(spacing: 16) {
+                        GlassCard {
+                            HStack(spacing: 12) {
+                                Image(systemName: "cpu").font(.title2).foregroundStyle(.primary)
+                                VStack(alignment: .leading, spacing: 2) {
+                                    Text(st.name ?? "pwnagotchi").font(.headline)
+                                    HStack(spacing: 6) {
+                                        Circle().fill(online ? Color.primary : Color.secondary).frame(width: 7, height: 7)
+                                        Text(online ? (st.mode ?? "—").uppercased() : "offline")
+                                            .font(.caption).foregroundStyle(.secondary)
+                                        if st.uptime != nil {
+                                            Text("· \(uptimeStr(st.uptime))").font(.caption).foregroundStyle(.secondary)
+                                        }
+                                    }
+                                }
+                                Spacer()
+                                if let b = st.battery {
+                                    HStack(spacing: 4) {
+                                        Image(systemName: batteryIcon(b))
+                                        Text("\(Int(b))%").font(.subheadline.weight(.semibold))
+                                    }
+                                }
+                            }
+                        }
                         if !toast.isEmpty {
                             GlassCard { Text(toast).font(.footnote).foregroundStyle(.secondary) }
                         }
@@ -528,6 +567,15 @@ struct ControlView: View {
                 Button("Cancel", role: .cancel) { confirm = nil }
                 Button("Yes", role: .destructive) { if let c = confirm { run(c.cmd) }; confirm = nil }
             }
+            .task { await loadStatus() }
+        }
+    }
+
+    private func loadStatus() async {
+        while !Task.isCancelled {
+            if let s = try? await PwnClient.fetchStatus(conn) { st = s; online = true }
+            else { online = false }
+            try? await Task.sleep(nanoseconds: 4_000_000_000)
         }
     }
 

@@ -5,7 +5,8 @@ import CoreLocation
 enum DemoData {
     static func status() -> DeviceStatus {
         DeviceStatus(name: "Ki213", mode: "auto", uptime: 7320, temp: 47, cpu: 22,
-                     mem: 58, sd_free: 9, pcaps: 17, networks: 42, cracked: 5, shakes: 3)
+                     mem: 58, sd_free: 9, pcaps: 17, networks: 42, cracked: 5, shakes: 3,
+                     battery: 76)
     }
 
     static func pwndex() -> [NetItem] {

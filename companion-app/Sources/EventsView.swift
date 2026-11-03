@@ -14,12 +14,40 @@ struct EventsView: View {
     @State private var events: [LogEvent] = []
     @State private var loaded = false
     @State private var live = true
+    @State private var query = ""
+    @State private var filter = "all"
+
+    private let kinds = ["all", "handshake", "deauth", "assoc", "upload", "ai", "peer", "error"]
+
+    private var shown: [LogEvent] {
+        events.filter { e in
+            (filter == "all" || e.kind == filter) &&
+            (query.isEmpty || e.text.lowercased().contains(query.lowercased()))
+        }
+    }
 
     var body: some View {
         ZStack {
             ThemeBG()
             List {
-                ForEach(events) { e in
+                Section {
+                    ScrollView(.horizontal, showsIndicators: false) {
+                        HStack(spacing: 6) {
+                            ForEach(kinds, id: \.self) { k in
+                                Button { filter = k } label: {
+                                    Text(k).font(.caption2.weight(.semibold))
+                                        .padding(.horizontal, 10).padding(.vertical, 5)
+                                        .foregroundStyle(filter == k ? Color(.systemBackground) : .primary)
+                                        .background(filter == k ? AnyShapeStyle(.primary) : AnyShapeStyle(.primary.opacity(0.08)),
+                                                    in: Capsule())
+                                }.buttonStyle(.plain)
+                            }
+                        }
+                    }
+                    .listRowInsets(EdgeInsets(top: 4, leading: 8, bottom: 4, trailing: 8))
+                    .listRowBackground(Color.clear)
+                }
+                ForEach(shown) { e in
                     HStack(spacing: 12) {
                         Image(systemName: e.icon)
                             .font(.system(size: 15))
@@ -32,15 +60,16 @@ struct EventsView: View {
                     }
                     .listRowBackground(Color.primary.opacity(0.05))
                 }
-                if events.isEmpty {
-                    Text(loaded ? "No recent events (needs plugin 1.6.0)" : "Loading…")
+                if shown.isEmpty {
+                    Text(loaded ? "No matching events (needs plugin 1.6.0)" : "Loading…")
                         .foregroundStyle(.secondary).listRowBackground(Color.clear)
                 }
             }
             .scrollContentBackground(.hidden)
+            .searchable(text: $query, prompt: "Search log")
             .refreshable { await load() }
         }
-        .navigationTitle("Events · \(events.count)")
+        .navigationTitle("Events · \(shown.count)")
         .navigationBarTitleDisplayMode(.inline)
         .toolbar {
             ToolbarItem(placement: .topBarTrailing) {

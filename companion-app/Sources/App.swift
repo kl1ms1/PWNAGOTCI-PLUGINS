@@ -141,6 +141,7 @@ struct DeviceStatus: Codable {
     var networks: Int?
     var cracked: Int?
     var shakes: Int?
+    var battery: Double?
 }
 
 struct NetItem: Codable, Identifiable {
