@@ -1,5 +1,23 @@
 import SwiftUI
 import UIKit
+import WidgetKit
+
+/// Writes the latest status into the shared app group so the home-screen
+/// widget can display it, then asks WidgetKit to refresh.
+enum SharedStore {
+    static let suite = "group.com.pwncompanion"
+    static func write(_ s: DeviceStatus) {
+        guard let d = UserDefaults(suiteName: suite) else { return }
+        d.set(s.name ?? "pwnagotchi", forKey: "name")
+        d.set((s.mode ?? "—").uppercased(), forKey: "mode")
+        d.set(Int(s.battery ?? 0), forKey: "battery")
+        d.set(s.shakes ?? 0, forKey: "shakes")
+        d.set(s.networks ?? 0, forKey: "nets")
+        d.set(s.cracked ?? 0, forKey: "cracked")
+        d.set(Date().timeIntervalSince1970, forKey: "updated")
+        WidgetCenter.shared.reloadAllTimelines()
+    }
+}
 
 @main
 struct PwnCompanionApp: App {
@@ -414,6 +432,29 @@ enum PwnClient {
         guard let url = conn.companionURL("cfg_set", "&key=\(e(key))&val=\(e(val))&quote=\(quote ? 1 : 0)") else { return (false, "bad url") }
         do {
             let (data, _) = try await URLSession.shared.data(for: request(url, conn, timeout: 12))
+            let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return (((j?["ok"]) as? Bool) ?? false, (j?["msg"] as? String) ?? "")
+        } catch { return (false, "no connection") }
+    }
+
+    /// Full backup tarball (config + pwndex + handshakes).
+    static func backupData(_ conn: ConnectionStore) async -> Data? {
+        if conn.demo { return Data("demo backup (config.toml + pwndex.json + handshakes/)".utf8) }
+        guard let url = conn.companionURL("backup") else { return nil }
+        return try? await URLSession.shared.data(for: request(url, conn, timeout: 180)).0
+    }
+
+    /// Upload a PNG for a face slot (key like HAPPY, LOOK_R).
+    @discardableResult
+    static func setFacePng(_ conn: ConnectionStore, key: String, png: Data) async -> (Bool, String) {
+        if conn.demo { return (true, "demo") }
+        let e = key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? key
+        guard let url = conn.companionURL("set_face_png", "&key=\(e)&b64=1") else { return (false, "bad url") }
+        var req = request(url, conn, timeout: 40)
+        req.httpMethod = "POST"
+        req.httpBody = Data(png.base64EncodedString().utf8)
+        do {
+            let (data, _) = try await URLSession.shared.data(for: req)
             let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             return (((j?["ok"]) as? Bool) ?? false, (j?["msg"] as? String) ?? "")
         } catch { return (false, "no connection") }

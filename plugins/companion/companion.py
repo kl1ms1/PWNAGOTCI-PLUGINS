@@ -54,7 +54,7 @@ class _LinkWidget(_Widget):
 
 class Companion(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "1.7.0"
+    __version__ = "1.8.0"
     __license__ = "MIT"
     __description__ = "One plugin for the Pwn Companion app: Bluetooth + BLE + JSON API."
 
@@ -999,4 +999,51 @@ class Companion(plugins.Plugin):
                 return send_file(p, as_attachment=True,
                                  download_name=os.path.basename(p))
             abort(404)
+        if action == "backup":
+            from flask import send_file
+            import tarfile
+            out = "/tmp/pwn-backup.tar.gz"
+            try:
+                with tarfile.open(out, "w:gz") as tar:
+                    cfg = self._config_path()
+                    if os.path.isfile(cfg):
+                        tar.add(cfg, arcname="config.toml")
+                    if os.path.isfile(self._dex_f):
+                        tar.add(self._dex_f, arcname="pwndex.json")
+                    seen = set()
+                    for d in self._hs_dirs():
+                        try:
+                            for f in os.listdir(d):
+                                if f.endswith(".pcap") and f not in seen:
+                                    seen.add(f)
+                                    tar.add(os.path.join(d, f), arcname="handshakes/" + f)
+                        except Exception:
+                            pass
+                return send_file(out, as_attachment=True, download_name="pwn-backup.tar.gz")
+            except Exception as e:
+                return jsonify(ok=False, msg=str(e)), 500
+        if action == "set_face_png":
+            import base64, re as _re
+            key = _re.sub(r"[^A-Za-z0-9_]", "", (request.args.get("key") or "").upper())
+            if not key:
+                return jsonify(ok=False, msg="bad key")
+            facedir = request.args.get("dir") or "/root/custom-faces"
+            body = request.get_data() or b""
+            if request.args.get("b64") in ("1", "true"):
+                try:
+                    body = base64.b64decode(body)
+                except Exception:
+                    return jsonify(ok=False, msg="bad base64")
+            if not body:
+                return jsonify(ok=False, msg="empty image")
+            try:
+                os.makedirs(facedir, exist_ok=True)
+                path = os.path.join(facedir, key + ".png")
+                with open(path, "wb") as f:
+                    f.write(body)
+            except Exception as e:
+                return jsonify(ok=False, msg=str(e))
+            self._cfg_set("ui.faces.png", "true", False)
+            ok, msg = self._cfg_set("ui.faces.%s" % key, path, True)
+            return jsonify(ok=ok, path=path, msg=msg)
         abort(404)

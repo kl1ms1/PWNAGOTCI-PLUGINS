@@ -10,6 +10,8 @@ targets:
     platform: iOS
     sources:
       - path: Sources
+    dependencies:
+      - target: PwnWidget
     settings:
       base:
         PRODUCT_NAME: PwnCompanion
@@ -21,6 +23,26 @@ targets:
         GENERATE_INFOPLIST_FILE: "NO"
         ASSETCATALOG_COMPILER_APPICON_NAME: AppIcon
         SWIFT_VERSION: "5.0"
+        CODE_SIGN_ENTITLEMENTS: Resources/PwnCompanion.entitlements
+        CODE_SIGNING_ALLOWED: "NO"
+        CODE_SIGNING_REQUIRED: "NO"
+        CODE_SIGN_IDENTITY: ""
+  PwnWidget:
+    type: app-extension
+    platform: iOS
+    sources:
+      - path: Widget
+    settings:
+      base:
+        PRODUCT_NAME: PwnWidget
+        PRODUCT_BUNDLE_IDENTIFIER: com.pwncompanion.app.widget
+        MARKETING_VERSION: "0.1.0"
+        CURRENT_PROJECT_VERSION: "1"
+        TARGETED_DEVICE_FAMILY: "1,2"
+        INFOPLIST_FILE: Widget/Info.plist
+        GENERATE_INFOPLIST_FILE: "NO"
+        SWIFT_VERSION: "5.0"
+        CODE_SIGN_ENTITLEMENTS: Widget/PwnWidget.entitlements
         CODE_SIGNING_ALLOWED: "NO"
         CODE_SIGNING_REQUIRED: "NO"
         CODE_SIGN_IDENTITY: ""

@@ -274,6 +274,7 @@ struct DashView: View {
             if let c = s.cpu { cpuHist.append(c); if cpuHist.count > 30 { cpuHist.removeFirst() } }
             if let t = s.temp { tempHist.append(t); if tempHist.count > 30 { tempHist.removeFirst() } }
             if let m = s.mem { memHist.append(m); if memHist.count > 30 { memHist.removeFirst() } }
+            if !conn.demo { SharedStore.write(s) }
         }
     }
 }
@@ -452,6 +453,7 @@ struct ControlView: View {
     @State private var showExport = false
     @State private var st = DeviceStatus()
     @State private var online = false
+    @State private var shareURL: URL?
 
     var body: some View {
         NavigationStack {
@@ -497,6 +499,10 @@ struct ControlView: View {
                             NavRow(icon: "face.smiling", title: "Faces", subtitle: "Customize the screen faces") { FacesView() }
                             div
                             NavRow(icon: "stethoscope", title: "Diagnostics", subtitle: "One-tap health checks") { DiagnosticsView() }
+                            div
+                            NavRow(icon: "chart.xyaxis.line", title: "History", subtitle: "CPU / temp / RAM / battery") { HistoryView() }
+                            div
+                            NavRow(icon: "photo.on.rectangle", title: "Face images", subtitle: "Upload PNG faces") { FaceImagesView() }
                         }
                         section("Mode") {
                             FunctionRow(icon: "bolt.horizontal.circle", title: "Auto Mode",
@@ -524,6 +530,9 @@ struct ControlView: View {
                             div
                             FunctionRow(icon: "arrow.down.circle", title: "Download all hashes",
                                         subtitle: "Pull .pcap to phone") { run("download_all") }
+                            div
+                            FunctionRow(icon: "externaldrive.badge.timemachine", title: "Backup device",
+                                        subtitle: "config + pwndex + handshakes → share") { backup() }
                         }
                         section("Recovery") {
                             FunctionRow(icon: "dot.radiowaves.left.and.right", title: "Fix Bluetooth",
@@ -568,6 +577,18 @@ struct ControlView: View {
                 Button("Yes", role: .destructive) { if let c = confirm { run(c.cmd) }; confirm = nil }
             }
             .task { await loadStatus() }
+            .sheet(item: $shareURL) { url in ActivityView(items: [url]) }
+        }
+    }
+
+    private func backup() {
+        toast = "Building backup… (handshakes can be large)"
+        Task {
+            guard let data = await PwnClient.backupData(conn) else { toast = "❌ backup failed"; return }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("pwn-backup.tar.gz")
+            try? data.write(to: url)
+            toast = "✅ backup ready (\(ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)))"
+            shareURL = url
         }
     }
 
