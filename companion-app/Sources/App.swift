@@ -27,6 +27,47 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var scheme: ColorScheme { self == .black ? .dark : .light }
 }
 
+enum Skin: String, CaseIterable, Identifiable {
+    case black, white, clear
+    var id: String { rawValue }
+    var label: String { self == .black ? "Чёрный" : self == .white ? "Белый" : "Прозрачный" }
+    var caseColor: Color {
+        switch self {
+        case .black: return Color(white: 0.14)
+        case .white: return Color(white: 0.92)
+        case .clear: return Color.white.opacity(0.08)
+        }
+    }
+    var line: Color { self == .white ? .black.opacity(0.25) : .white.opacity(0.2) }
+}
+
+enum FaceColor: String, CaseIterable, Identifiable {
+    case white, green, amber, blue
+    var id: String { rawValue }
+    var label: String { ["white": "Белый", "green": "Зелёный", "amber": "Янтарь", "blue": "Синий"][rawValue] ?? rawValue }
+    var color: Color {
+        switch self {
+        case .white: return .white
+        case .green: return Color(red: 0.55, green: 1.0, blue: 0.6)
+        case .amber: return Color(red: 1.0, green: 0.78, blue: 0.35)
+        case .blue: return Color(red: 0.55, green: 0.8, blue: 1.0)
+        }
+    }
+    var uiColor: UIColor { UIColor(color) }
+}
+
+/// Filled button whose label always contrasts the fill (fixes white-on-white).
+struct FilledStyle: ButtonStyle {
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.body.weight(.semibold))
+            .foregroundStyle(Color(.systemBackground))
+            .frame(maxWidth: .infinity).padding(.vertical, 12)
+            .background(.primary.opacity(configuration.isPressed ? 0.7 : 1),
+                        in: Capsule())
+    }
+}
+
 /// Connection settings to the pwnagotchi (Bluetooth / Wi-Fi — no cable: iOS has
 /// no USB-ethernet). Persisted in UserDefaults.
 final class ConnectionStore: ObservableObject {
@@ -35,6 +76,8 @@ final class ConnectionStore: ObservableObject {
     @Published var user: String { didSet { save() } }
     @Published var pass: String { didSet { save() } }
     @Published var theme: AppTheme { didSet { save() } }
+    @Published var skin: Skin { didSet { save() } }
+    @Published var faceColor: FaceColor { didSet { save() } }
     @Published var entered = false     // passed the connect screen
     @Published var demo = false        // demo/beta mode (fake data, no device)
 
@@ -45,6 +88,8 @@ final class ConnectionStore: ObservableObject {
         user = d.string(forKey: "user") ?? "changeme"
         pass = d.string(forKey: "pass") ?? "changeme"
         theme = AppTheme(rawValue: d.string(forKey: "theme") ?? "") ?? .black
+        skin = Skin(rawValue: d.string(forKey: "skin") ?? "") ?? .black
+        faceColor = FaceColor(rawValue: d.string(forKey: "faceColor") ?? "") ?? .white
     }
 
     private func save() {
@@ -52,6 +97,8 @@ final class ConnectionStore: ObservableObject {
         d.set(host, forKey: "host"); d.set(port, forKey: "port")
         d.set(user, forKey: "user"); d.set(pass, forKey: "pass")
         d.set(theme.rawValue, forKey: "theme")
+        d.set(skin.rawValue, forKey: "skin")
+        d.set(faceColor.rawValue, forKey: "faceColor")
     }
 
     var baseURL: URL? { URL(string: "http://\(host):\(port)") }
@@ -101,7 +148,7 @@ enum PwnClient {
     }
 
     static func fetchUIImage(_ conn: ConnectionStore) async throws -> UIImage {
-        if conn.demo { try? await Task.sleep(nanoseconds: 300_000_000); return DemoData.faceImage() }
+        if conn.demo { try? await Task.sleep(nanoseconds: 300_000_000); return DemoData.faceImage(conn.faceColor.uiColor) }
         guard let url = conn.uiImageURL else { throw URLError(.badURL) }
         let (data, resp) = try await URLSession.shared.data(for: request(url, conn))
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),

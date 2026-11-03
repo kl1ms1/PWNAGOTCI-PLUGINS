@@ -2,122 +2,134 @@ import SwiftUI
 
 struct ConnectView: View {
     @EnvironmentObject var conn: ConnectionStore
-    @State private var showBoard = false
+    @State private var searching = false
 
     var body: some View {
         ZStack {
             Color(.systemBackground).ignoresSafeArea()
-            VStack(spacing: 22) {
-                Spacer(minLength: 20)
+            VStack(spacing: 18) {
+                Spacer(minLength: 16)
+                Text("Pwn Companion").font(.largeTitle.bold())
 
-                Text("Pwn Companion")
-                    .font(.largeTitle.bold())
-
-                DeviceGraphic(showBoard: showBoard)
-                    .frame(height: 230)
+                DeviceGraphic(skin: conn.skin, faceColor: conn.faceColor)
+                    .frame(height: 210)
                     .padding(.horizontal, 24)
 
-                Picker("", selection: $showBoard) {
-                    Text("Экран").tag(false)
-                    Text("Плата").tag(true)
-                }
-                .pickerStyle(.segmented)
-                .padding(.horizontal, 60)
+                VStack(spacing: 10) {
+                    Picker("", selection: $conn.skin) {
+                        ForEach(Skin.allCases) { s in Text(s.label).tag(s) }
+                    }
+                    .pickerStyle(.segmented)
 
-                Text("Custom")
-                    .font(.headline)
-                Text("кастомизация вида — скоро")
-                    .font(.caption).foregroundStyle(.secondary)
+                    Picker("", selection: $conn.faceColor) {
+                        ForEach(FaceColor.allCases) { c in Text(c.label).tag(c) }
+                    }
+                    .pickerStyle(.segmented)
+                }
+                .padding(.horizontal, 40)
+
+                Text("Custom").font(.headline)
 
                 Spacer()
 
                 VStack(spacing: 12) {
-                    Button {
-                        conn.demo = true
-                        conn.entered = true
-                    } label: {
+                    Button { conn.demo = true; conn.entered = true } label: {
                         Label("Демо (Beta) — без устройства", systemImage: "play.circle.fill")
-                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.bordered)
-                    .controlSize(.large)
+                    .buttonStyle(.bordered).controlSize(.large)
+                    .frame(maxWidth: .infinity)
 
-                    Button {
-                        conn.demo = false
-                        conn.entered = true
-                    } label: {
+                    Button { searching = true } label: {
                         Label("Подключиться", systemImage: "dot.radiowaves.left.and.right")
-                            .frame(maxWidth: .infinity)
                     }
-                    .buttonStyle(.borderedProminent)
-                    .controlSize(.large)
-                    .tint(.primary)
+                    .buttonStyle(FilledStyle())
                 }
                 .padding(.horizontal, 24)
-                .padding(.bottom, 24)
+                .padding(.bottom, 20)
+            }
+            .fullScreenCover(isPresented: $searching) {
+                SearchingView().environmentObject(conn)
             }
         }
     }
 }
 
-/// A stylized pwnagotchi device: either its e-ink screen (a face) or the board.
+/// Flipper-style "searching for device" screen (BLE scan comes with the server).
+struct SearchingView: View {
+    @EnvironmentObject var conn: ConnectionStore
+    @Environment(\.dismiss) private var dismiss
+    @State private var dots = 0
+
+    var body: some View {
+        ZStack {
+            Color(.systemBackground).ignoresSafeArea()
+            VStack(spacing: 24) {
+                HStack {
+                    Button { dismiss() } label: { Image(systemName: "chevron.left").font(.title3) }
+                    Spacer()
+                    Text("Поиск устройства").font(.headline)
+                    Spacer()
+                    Image(systemName: "chevron.left").opacity(0)
+                }
+                .padding()
+
+                Spacer()
+
+                HStack(spacing: 10) {
+                    Image(systemName: "iphone").font(.system(size: 44)).foregroundStyle(.secondary)
+                    HStack(spacing: 6) {
+                        ForEach(0..<3, id: \.self) { i in
+                            Circle().fill(.primary.opacity(i <= dots ? 1 : 0.2)).frame(width: 7, height: 7)
+                        }
+                    }
+                    Image(systemName: "dot.radiowaves.left.and.right")
+                        .font(.system(size: 40)).foregroundStyle(.primary)
+                }
+
+                ProgressView().tint(.primary)
+                Text("Ищу pwnagotchi по Bluetooth…")
+                    .font(.subheadline).foregroundStyle(.secondary)
+                Text("Убедись, что на девайсе включён btlink.\nПрямой BLE-поиск появится, когда заведём BLE-сервер.")
+                    .font(.caption).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .padding(.horizontal, 30)
+
+                Spacer()
+
+                Button("Войти всё равно") {
+                    conn.demo = false; conn.entered = true; dismiss()
+                }
+                .buttonStyle(FilledStyle())
+                .padding(.horizontal, 24).padding(.bottom, 24)
+            }
+        }
+        .task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 450_000_000)
+                dots = (dots + 1) % 3
+            }
+        }
+    }
+}
+
+/// Stylized pwnagotchi: a case (skin) with its e-ink screen showing the face.
 struct DeviceGraphic: View {
-    var showBoard: Bool
+    var skin: Skin
+    var faceColor: FaceColor
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
-                .fill(Color(white: 0.14))
+                .fill(skin.caseColor)
                 .overlay(RoundedRectangle(cornerRadius: 24, style: .continuous)
-                    .strokeBorder(.primary.opacity(0.15), lineWidth: 1))
-            if showBoard {
-                board
-            } else {
-                screen
-            }
-        }
-    }
-
-    private var screen: some View {
-        RoundedRectangle(cornerRadius: 12).fill(.black)
-            .overlay(
-                VStack(spacing: 6) {
-                    Text("(◕‿‿◕)").font(.system(size: 44, weight: .bold)).foregroundStyle(.white)
-                    Text("Ki213 · на охоте").font(.caption).foregroundStyle(.gray)
-                }
-            )
-            .padding(26)
-    }
-
-    private var board: some View {
-        GeometryReader { geo in
-            ZStack {
-                // traces
-                Path { p in
-                    for i in 0..<6 {
-                        let y = geo.size.height * (0.2 + 0.12 * Double(i))
-                        p.move(to: CGPoint(x: 30, y: y)); p.addLine(to: CGPoint(x: geo.size.width - 30, y: y))
+                    .strokeBorder(skin.line, lineWidth: 1))
+            RoundedRectangle(cornerRadius: 12).fill(.black)
+                .overlay(
+                    VStack(spacing: 6) {
+                        Text("(◕‿‿◕)").font(.system(size: 44, weight: .bold))
+                            .foregroundStyle(faceColor.color)
+                        Text("Ki213 · на охоте").font(.caption).foregroundStyle(.gray)
                     }
-                }.stroke(.primary.opacity(0.12), lineWidth: 1)
-                // chips
-                HStack(spacing: 18) {
-                    chip(40); chip(56); chip(34)
-                }
-                // GPIO header
-                HStack(spacing: 4) {
-                    ForEach(0..<10, id: \.self) { _ in
-                        Circle().fill(.primary.opacity(0.35)).frame(width: 5, height: 5)
-                    }
-                }
-                .frame(maxHeight: .infinity, alignment: .top)
-                .padding(.top, 24)
-            }
+                )
+                .padding(26)
         }
-        .padding(20)
-    }
-
-    private func chip(_ s: CGFloat) -> some View {
-        RoundedRectangle(cornerRadius: 6).fill(Color(white: 0.25))
-            .overlay(RoundedRectangle(cornerRadius: 6).strokeBorder(.primary.opacity(0.25), lineWidth: 1))
-            .frame(width: s, height: s)
     }
 }

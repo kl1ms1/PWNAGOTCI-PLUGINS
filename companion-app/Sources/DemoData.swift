@@ -28,7 +28,7 @@ enum DemoData {
     }
 
     /// A drawn pwnagotchi-style face for the Dash "screen" in demo mode.
-    static func faceImage() -> UIImage {
+    static func faceImage(_ color: UIColor = .white) -> UIImage {
         let size = CGSize(width: 250, height: 122)
         let r = UIGraphicsImageRenderer(size: size)
         return r.image { ctx in
@@ -37,7 +37,7 @@ enum DemoData {
             let face = "(◕‿‿◕)"
             let attrs: [NSAttributedString.Key: Any] = [
                 .font: UIFont.systemFont(ofSize: 40, weight: .bold),
-                .foregroundColor: UIColor.white,
+                .foregroundColor: color,
             ]
             let s = face.size(withAttributes: attrs)
             face.draw(at: CGPoint(x: (size.width - s.width) / 2, y: (size.height - s.height) / 2 - 8),

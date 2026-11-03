@@ -133,11 +133,11 @@ struct DashView: View {
 
                         HStack(spacing: 10) {
                             Button { Task { await refresh() } } label: {
-                                Label("Обновить", systemImage: "arrow.clockwise").frame(maxWidth: .infinity)
-                            }.buttonStyle(.borderedProminent).tint(.primary)
+                                Label("Обновить", systemImage: "arrow.clockwise")
+                            }.buttonStyle(FilledStyle())
                             Button { showWeb = true } label: {
                                 Label("Веб-морда", systemImage: "globe").frame(maxWidth: .infinity)
-                            }.buttonStyle(.bordered).disabled(conn.baseURL == nil)
+                            }.buttonStyle(.bordered).disabled(conn.baseURL == nil || conn.demo)
                         }
                     }
                     .padding()
@@ -230,9 +230,11 @@ struct PwndexView: View {
 }
 
 struct EditPwSheet: View {
+    @EnvironmentObject var conn: ConnectionStore
     let item: NetItem
     let onSave: (String) -> Void
     @State private var pw: String
+    @State private var msg = ""
     @Environment(\.dismiss) private var dismiss
     init(item: NetItem, onSave: @escaping (String) -> Void) {
         self.item = item; self.onSave = onSave; _pw = State(initialValue: item.pw)
@@ -240,17 +242,32 @@ struct EditPwSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Сеть") { Text(item.ssid); Text(item.mac).font(.caption).foregroundStyle(.secondary) }
-                Section("Пароль") {
+                Section("Сеть") {
+                    Text(item.ssid).font(.headline)
+                    Text(item.mac).font(.caption).foregroundStyle(.secondary)
+                }
+                Section("Пароль (если это твоя сеть)") {
                     TextField("пароль", text: $pw).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    Button { onSave(pw); msg = "Пароль сохранён" } label: {
+                        Label("Сохранить пароль", systemImage: "key.fill")
+                    }
+                }
+                Section("Действия") {
+                    actionRow("Скачать хэш (.pcap)", "arrow.down.doc", "Хэш скачан")
+                    actionRow("Добавить в whitelist", "checkmark.shield", "В whitelist")
+                    actionRow("Залить на wpa-sec", "arrow.up.circle", "Отправлено на wpa-sec")
+                }
+                if !msg.isEmpty {
+                    Section { Text("✅ " + msg + (conn.demo ? " (демо)" : "")).foregroundStyle(.secondary) }
                 }
             }
-            .navigationTitle("Правка").navigationBarTitleDisplayMode(.inline)
-            .toolbar {
-                ToolbarItem(placement: .topBarLeading) { Button("Отмена") { dismiss() } }
-                ToolbarItem(placement: .topBarTrailing) { Button("Сохранить") { onSave(pw); dismiss() } }
-            }
+            .navigationTitle(item.ssid).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Готово") { dismiss() } } }
         }
+    }
+
+    private func actionRow(_ title: String, _ icon: String, _ done: String) -> some View {
+        Button { msg = done } label: { Label(title, systemImage: icon) }
     }
 }
 
