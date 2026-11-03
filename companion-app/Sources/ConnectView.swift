@@ -15,16 +15,14 @@ struct ConnectView: View {
                     .frame(height: 210)
                     .padding(.horizontal, 24)
 
-                VStack(spacing: 10) {
+                VStack(spacing: 12) {
                     Picker("", selection: $conn.skin) {
                         ForEach(Skin.allCases) { s in Text(s.label).tag(s) }
                     }
                     .pickerStyle(.segmented)
 
-                    Picker("", selection: $conn.faceColor) {
-                        ForEach(FaceColor.allCases) { c in Text(c.label).tag(c) }
-                    }
-                    .pickerStyle(.segmented)
+                    ColorPicker("Цвет экрана", selection: $conn.faceColor, supportsOpacity: false)
+                        .font(.subheadline)
                 }
                 .padding(.horizontal, 40)
 
@@ -114,7 +112,7 @@ struct SearchingView: View {
 /// Stylized pwnagotchi: a case (skin) with its e-ink screen showing the face.
 struct DeviceGraphic: View {
     var skin: Skin
-    var faceColor: FaceColor
+    var faceColor: Color
     var body: some View {
         ZStack {
             RoundedRectangle(cornerRadius: 24, style: .continuous)
@@ -125,7 +123,7 @@ struct DeviceGraphic: View {
                 .overlay(
                     VStack(spacing: 6) {
                         Text("(◕‿‿◕)").font(.system(size: 44, weight: .bold))
-                            .foregroundStyle(faceColor.color)
+                            .foregroundStyle(faceColor)
                         Text("Ki213 · на охоте").font(.caption).foregroundStyle(.gray)
                     }
                 )

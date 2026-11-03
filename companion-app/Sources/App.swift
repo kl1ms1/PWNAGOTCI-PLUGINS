@@ -41,21 +41,6 @@ enum Skin: String, CaseIterable, Identifiable {
     var line: Color { self == .white ? .black.opacity(0.25) : .white.opacity(0.2) }
 }
 
-enum FaceColor: String, CaseIterable, Identifiable {
-    case white, green, amber, blue
-    var id: String { rawValue }
-    var label: String { ["white": "Белый", "green": "Зелёный", "amber": "Янтарь", "blue": "Синий"][rawValue] ?? rawValue }
-    var color: Color {
-        switch self {
-        case .white: return .white
-        case .green: return Color(red: 0.55, green: 1.0, blue: 0.6)
-        case .amber: return Color(red: 1.0, green: 0.78, blue: 0.35)
-        case .blue: return Color(red: 0.55, green: 0.8, blue: 1.0)
-        }
-    }
-    var uiColor: UIColor { UIColor(color) }
-}
-
 /// Filled button whose label always contrasts the fill (fixes white-on-white).
 struct FilledStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
@@ -77,7 +62,7 @@ final class ConnectionStore: ObservableObject {
     @Published var pass: String { didSet { save() } }
     @Published var theme: AppTheme { didSet { save() } }
     @Published var skin: Skin { didSet { save() } }
-    @Published var faceColor: FaceColor { didSet { save() } }
+    @Published var faceColor: Color { didSet { save() } }   // any color (Apple picker)
     @Published var entered = false     // passed the connect screen
     @Published var demo = false        // demo/beta mode (fake data, no device)
 
@@ -89,8 +74,13 @@ final class ConnectionStore: ObservableObject {
         pass = d.string(forKey: "pass") ?? "changeme"
         theme = AppTheme(rawValue: d.string(forKey: "theme") ?? "") ?? .black
         skin = Skin(rawValue: d.string(forKey: "skin") ?? "") ?? .black
-        faceColor = FaceColor(rawValue: d.string(forKey: "faceColor") ?? "") ?? .white
+        let fr = d.object(forKey: "faceR") as? Double ?? 1.0
+        let fg = d.object(forKey: "faceG") as? Double ?? 1.0
+        let fb = d.object(forKey: "faceB") as? Double ?? 1.0
+        faceColor = Color(red: fr, green: fg, blue: fb)
     }
+
+    var faceUIColor: UIColor { UIColor(faceColor) }
 
     private func save() {
         let d = UserDefaults.standard
@@ -98,7 +88,9 @@ final class ConnectionStore: ObservableObject {
         d.set(user, forKey: "user"); d.set(pass, forKey: "pass")
         d.set(theme.rawValue, forKey: "theme")
         d.set(skin.rawValue, forKey: "skin")
-        d.set(faceColor.rawValue, forKey: "faceColor")
+        var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
+        UIColor(faceColor).getRed(&r, green: &g, blue: &b, alpha: &a)
+        d.set(Double(r), forKey: "faceR"); d.set(Double(g), forKey: "faceG"); d.set(Double(b), forKey: "faceB")
     }
 
     var baseURL: URL? { URL(string: "http://\(host):\(port)") }
@@ -148,7 +140,7 @@ enum PwnClient {
     }
 
     static func fetchUIImage(_ conn: ConnectionStore) async throws -> UIImage {
-        if conn.demo { try? await Task.sleep(nanoseconds: 300_000_000); return DemoData.faceImage(conn.faceColor.uiColor) }
+        if conn.demo { try? await Task.sleep(nanoseconds: 300_000_000); return DemoData.faceImage(conn.faceUIColor) }
         guard let url = conn.uiImageURL else { throw URLError(.badURL) }
         let (data, resp) = try await URLSession.shared.data(for: request(url, conn))
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),

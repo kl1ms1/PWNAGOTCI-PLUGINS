@@ -277,6 +277,8 @@ struct ControlView: View {
     @EnvironmentObject var conn: ConnectionStore
     @State private var toast = ""
     @State private var confirm: (title: String, cmd: String)?
+    @State private var exportText = ""
+    @State private var showExport = false
 
     var body: some View {
         NavigationStack {
@@ -304,6 +306,16 @@ struct ControlView: View {
                             FunctionRow(icon: "power.circle", title: "Shutdown",
                                         subtitle: "Выключить устройство") { confirm = ("Выключить?", "shutdown") }
                         }
+                        section("Данные") {
+                            FunctionRow(icon: "key.horizontal.fill", title: "Выгрузить все пароли",
+                                        subtitle: "Список сетей+паролей → поделиться") { exportPasswords() }
+                            div
+                            FunctionRow(icon: "arrow.up.circle", title: "Залить все хэши на wpa-sec",
+                                        subtitle: "Отправить все .pcap") { run("upload_all") }
+                            div
+                            FunctionRow(icon: "arrow.down.circle", title: "Скачать все хэши",
+                                        subtitle: "Забрать .pcap на телефон") { run("download_all") }
+                        }
                         section("Интерфейс") {
                             FunctionRow(icon: "globe", title: "Pwnagotchi Web UI",
                                         subtitle: "Открыть веб-морду (на Dash)") {
@@ -314,6 +326,21 @@ struct ControlView: View {
                 }
             }
             .navigationTitle("Control")
+            .sheet(isPresented: $showExport) {
+                NavigationStack {
+                    ScrollView {
+                        Text(exportText).font(.callout.monospaced()).textSelection(.enabled)
+                            .frame(maxWidth: .infinity, alignment: .leading).padding()
+                    }
+                    .navigationTitle("Все пароли").navigationBarTitleDisplayMode(.inline)
+                    .toolbar {
+                        ToolbarItem(placement: .topBarLeading) { Button("Готово") { showExport = false } }
+                        ToolbarItem(placement: .topBarTrailing) {
+                            ShareLink(item: exportText) { Image(systemName: "square.and.arrow.up") }
+                        }
+                    }
+                }
+            }
             .alert(confirm?.title ?? "", isPresented: Binding(
                 get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
                 Button("Отмена", role: .cancel) { confirm = nil }
@@ -337,7 +364,17 @@ struct ControlView: View {
         toast = "Отправляю: \(cmd)…"
         Task {
             let ok = (try? await PwnClient.control(conn, cmd: cmd)) ?? false
-            toast = ok ? "✅ \(cmd) выполнено" : "❌ не вышло (\(cmd))"
+            toast = ok ? "✅ \(cmd) выполнено" : "❌ \(cmd): нужен эндпоинт на девайсе (скоро)"
+        }
+    }
+
+    private func exportPasswords() {
+        Task {
+            let nets = (try? await PwnClient.fetchPwndex(conn)) ?? []
+            let lines = nets.filter { !$0.pw.isEmpty }
+                .map { "\($0.ssid)  —  \($0.pw)   (\($0.mac))" }
+            exportText = lines.isEmpty ? "Нет сохранённых паролей" : lines.joined(separator: "\n")
+            showExport = true
         }
     }
 }
