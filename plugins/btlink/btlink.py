@@ -78,6 +78,7 @@ class BTLink(plugins.Plugin):
         self._label_pos = (0, 83)     # "BT: nick" line, above the cracked-pw line
         self._agent_started = False
         self._keep_started = False
+        self._btctl_proc = None       # persistent bluetoothctl agent process
         self._f_small = None
         self._f_big = None
 
@@ -131,38 +132,65 @@ class BTLink(plugins.Plugin):
 
     def _keepalive_loop(self):
         """Runs in a thread (not on_epoch), so it works the SAME in auto AND
-        manual mode: keep Bluetooth discoverable and (re)join the phone's PAN."""
+        manual mode: keep the pairing agent alive + Pairable on, and join PAN."""
         while True:
             try:
-                if not self._iface_ip():
-                    self._sh(["bluetoothctl", "discoverable", "on"])
-                    self._sh(["bluetoothctl", "pairable", "on"])
+                # keep the persistent agent alive and re-assert pairable via it
+                if self._btctl_proc is not None:
+                    if self._btctl_proc.poll() is not None:
+                        self._start_btctl_agent()          # it died -> relaunch
+                    elif not self._iface_ip():
+                        try:
+                            self._btctl_proc.stdin.write("pairable on\ndiscoverable on\n")
+                            self._btctl_proc.stdin.flush()
+                        except Exception:
+                            self._start_btctl_agent()
                 self._ensure_pan()
             except Exception:
                 logging.debug("[btlink] keepalive tick failed")
             time.sleep(20)
 
-    # --- BlueZ pairing agent: DisplayOnly -> show passkey on the e-ink -----
+    # --- pairing agent -----------------------------------------------------
     def _start_agent(self):
         if self._agent_started:
             return
         self._agent_started = True
-        t = threading.Thread(target=self._agent_loop, daemon=True)
-        t.start()
+        try:
+            import gi  # noqa: F401
+            has_gi = True
+        except Exception:
+            has_gi = False
+        if has_gi:
+            # D-Bus DisplayOnly agent -> passkey shown on the e-ink
+            threading.Thread(target=self._agent_loop, daemon=True).start()
+        else:
+            # reliable fallback: a PERSISTENT bluetoothctl agent (code-free,
+            # 'just works' pairing) — a one-shot agent would exit and leave the
+            # device un-pairable, which is exactly the bug we hit.
+            self._start_btctl_agent()
+
+    def _start_btctl_agent(self):
+        import subprocess
+        try:
+            if self._btctl_proc is not None and self._btctl_proc.poll() is None:
+                return
+            p = subprocess.Popen(["bluetoothctl"], stdin=subprocess.PIPE,
+                                 stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                                 text=True)
+            for c in ("power on", "pairable on", "discoverable on",
+                      "discoverable-timeout 0", "agent NoInputNoOutput", "default-agent"):
+                p.stdin.write(c + "\n")
+            p.stdin.flush()
+            self._btctl_proc = p          # KEEP the process alive -> agent stays up
+            logging.info("[btlink] persistent bluetoothctl agent (NoInputNoOutput) up")
+        except Exception:
+            logging.exception("[btlink] bluetoothctl agent failed")
 
     def _agent_loop(self):
-        try:
-            import dbus
-            import dbus.service
-            import dbus.mainloop.glib
-            from gi.repository import GLib
-        except Exception as e:
-            logging.warning("[btlink] no python dbus/gi (%s) -> code-free pairing. "
-                            "Install python3-gi python3-dbus for the on-screen code.", e)
-            # fall back: a capability-less agent via bluetoothctl (just works)
-            self._sh(["bluetoothctl", "agent", "NoInputNoOutput"])
-            self._sh(["bluetoothctl", "default-agent"])
-            return
+        import dbus
+        import dbus.service
+        import dbus.mainloop.glib
+        from gi.repository import GLib
 
         plugin = self
 
