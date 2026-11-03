@@ -2,7 +2,7 @@ name: PwnCompanion
 options:
   bundleIdPrefix: com.pwncompanion
   deploymentTarget:
-    iOS: "16.0"
+    iOS: "16.1"
   createIntermediateGroups: true
 targets:
   PwnCompanion:

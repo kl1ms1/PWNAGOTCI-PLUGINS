@@ -81,6 +81,7 @@ struct MapView: View {
         span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05))
     @State private var centered = false
 
+    @State private var selectedPin: CatchPin?
     private var pins: [CatchPin] { conn.demo ? DemoData.pins() : store.pins }
 
     var body: some View {
@@ -89,16 +90,19 @@ struct MapView: View {
                 Map(coordinateRegion: $region, showsUserLocation: true,
                     annotationItems: pins) { pin in
                     MapAnnotation(coordinate: pin.coord) {
-                        VStack(spacing: 2) {
-                            Image(systemName: "wifi")
-                                .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
-                                .padding(7)
-                                .background(Color.black, in: Circle())
-                                .overlay(Circle().strokeBorder(.white.opacity(0.8), lineWidth: 1.5))
-                            Text(pin.ssid).font(.caption2.weight(.semibold))
-                                .padding(.horizontal, 5).padding(.vertical, 1)
-                                .background(.ultraThinMaterial, in: Capsule())
+                        Button { selectedPin = pin } label: {
+                            VStack(spacing: 2) {
+                                Image(systemName: "wifi")
+                                    .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
+                                    .padding(7)
+                                    .background(Color.black, in: Circle())
+                                    .overlay(Circle().strokeBorder(.white.opacity(0.8), lineWidth: 1.5))
+                                Text(pin.ssid).font(.caption2.weight(.semibold))
+                                    .padding(.horizontal, 5).padding(.vertical, 1)
+                                    .background(.ultraThinMaterial, in: Capsule())
+                            }
                         }
+                        .buttonStyle(.plain)
                     }
                 }
                 .ignoresSafeArea(edges: .top)
@@ -122,6 +126,7 @@ struct MapView: View {
             .navigationTitle("Карта уловов")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .sheet(item: $selectedPin) { pin in PinSheet(pin: pin) }
         }
         .task {
             if conn.demo {
@@ -143,6 +148,38 @@ struct MapView: View {
                 }
                 try? await Task.sleep(nanoseconds: 5_000_000_000)
             }
+        }
+    }
+}
+
+/// Tap a map bubble -> this menu (ssid + actions, like pwndex).
+struct PinSheet: View {
+    let pin: CatchPin
+    @State private var msg = ""
+    @State private var pw = ""
+    @Environment(\.dismiss) private var dismiss
+    var body: some View {
+        NavigationStack {
+            Form {
+                Section("Сеть") {
+                    Text(pin.ssid).font(.headline)
+                    Text(pin.id).font(.caption).foregroundStyle(.secondary)
+                    Text(String(format: "%.5f, %.5f", pin.lat, pin.lon))
+                        .font(.caption2).foregroundStyle(.secondary)
+                }
+                Section("Пароль (если твоя сеть)") {
+                    TextField("пароль", text: $pw).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    Button { msg = "Пароль сохранён" } label: { Label("Сохранить пароль", systemImage: "key.fill") }
+                }
+                Section("Действия") {
+                    Button { msg = "Хэш скачан" } label: { Label("Скачать хэш (.pcap)", systemImage: "arrow.down.doc") }
+                    Button { msg = "В whitelist" } label: { Label("Добавить в whitelist", systemImage: "checkmark.shield") }
+                    Button { msg = "Отправлено на wpa-sec" } label: { Label("Залить на wpa-sec", systemImage: "arrow.up.circle") }
+                }
+                if !msg.isEmpty { Section { Text("✅ " + msg).foregroundStyle(.secondary) } }
+            }
+            .navigationTitle(pin.ssid).navigationBarTitleDisplayMode(.inline)
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Готово") { dismiss() } } }
         }
     }
 }

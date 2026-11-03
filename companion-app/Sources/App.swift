@@ -15,6 +15,7 @@ struct PwnCompanionApp: App {
             }
             .environmentObject(conn)
             .preferredColorScheme(conn.theme.scheme)
+            .fontDesign(conn.font.design)
             .tint(.primary)
         }
     }
@@ -25,6 +26,22 @@ enum AppTheme: String, CaseIterable, Identifiable {
     var id: String { rawValue }
     var label: String { self == .black ? "Чёрная" : "Белая" }
     var scheme: ColorScheme { self == .black ? .dark : .light }
+}
+
+enum FontStyle: String, CaseIterable, Identifiable {
+    case system, rounded, serif, mono
+    var id: String { rawValue }
+    var label: String {
+        ["system": "Системный", "rounded": "Округлый", "serif": "Сериф", "mono": "Моно"][rawValue] ?? rawValue
+    }
+    var design: Font.Design {
+        switch self {
+        case .system: return .default
+        case .rounded: return .rounded
+        case .serif: return .serif
+        case .mono: return .monospaced
+        }
+    }
 }
 
 enum Skin: String, CaseIterable, Identifiable {
@@ -63,6 +80,7 @@ final class ConnectionStore: ObservableObject {
     @Published var theme: AppTheme { didSet { save() } }
     @Published var skin: Skin { didSet { save() } }
     @Published var faceColor: Color { didSet { save() } }   // any color (Apple picker)
+    @Published var font: FontStyle { didSet { save() } }
     @Published var entered = false     // passed the connect screen
     @Published var demo = false        // demo/beta mode (fake data, no device)
 
@@ -78,6 +96,7 @@ final class ConnectionStore: ObservableObject {
         let fg = d.object(forKey: "faceG") as? Double ?? 1.0
         let fb = d.object(forKey: "faceB") as? Double ?? 1.0
         faceColor = Color(red: fr, green: fg, blue: fb)
+        font = FontStyle(rawValue: d.string(forKey: "font") ?? "") ?? .rounded
     }
 
     var faceUIColor: UIColor { UIColor(faceColor) }
@@ -91,6 +110,7 @@ final class ConnectionStore: ObservableObject {
         var r: CGFloat = 0, g: CGFloat = 0, b: CGFloat = 0, a: CGFloat = 0
         UIColor(faceColor).getRed(&r, green: &g, blue: &b, alpha: &a)
         d.set(Double(r), forKey: "faceR"); d.set(Double(g), forKey: "faceG"); d.set(Double(b), forKey: "faceB")
+        d.set(font.rawValue, forKey: "font")
     }
 
     var baseURL: URL? { URL(string: "http://\(host):\(port)") }

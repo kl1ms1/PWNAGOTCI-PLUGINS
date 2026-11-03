@@ -139,6 +139,11 @@ struct DashView: View {
                                 Label("Веб-морда", systemImage: "globe").frame(maxWidth: .infinity)
                             }.buttonStyle(.bordered).disabled(conn.baseURL == nil || conn.demo)
                         }
+
+                        NavigationLink { EventsView() } label: {
+                            Label("События", systemImage: "list.bullet.rectangle")
+                                .frame(maxWidth: .infinity)
+                        }.buttonStyle(.bordered)
                     }
                     .padding()
                 }
@@ -403,6 +408,10 @@ struct SettingsView: View {
                     Picker("Тема", selection: $conn.theme) {
                         ForEach(AppTheme.allCases) { t in Text(t.label).tag(t) }
                     }.pickerStyle(.segmented)
+                    Picker("Шрифт", selection: $conn.font) {
+                        ForEach(FontStyle.allCases) { f in Text(f.label).tag(f) }
+                    }
+                    ColorPicker("Цвет экрана девайса", selection: $conn.faceColor, supportsOpacity: false)
                 }
                 Section("Подключение") {
                     LabeledField("IP устройства", text: $conn.host)

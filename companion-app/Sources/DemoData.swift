@@ -19,6 +19,19 @@ enum DemoData {
         ]
     }
 
+    static func events() -> [AppEvent] {
+        [
+            AppEvent(time: "12:03:41", icon: "antenna.radiowaves.left.and.right", text: "deauth → Xiaomi_67 (50:4F:3B…)"),
+            AppEvent(time: "12:03:40", icon: "person.2.fill", text: "associate → Keenetic-дом"),
+            AppEvent(time: "12:03:38", icon: "hand.wave.fill", text: "рукопожатие поймано: HomeWiFi"),
+            AppEvent(time: "12:03:12", icon: "wifi", text: "новая сеть: MGTS_GPON"),
+            AppEvent(time: "12:02:55", icon: "arrow.up.circle", text: "залито на wpa-sec: 2 .pcap"),
+            AppEvent(time: "12:02:10", icon: "bolt.fill", text: "канал → 6"),
+            AppEvent(time: "12:01:00", icon: "face.smiling", text: "лицо: (⌐■_■) — поймал!"),
+            AppEvent(time: "12:00:02", icon: "play.circle", text: "режим: AUTO, старт охоты"),
+        ]
+    }
+
     static func pins() -> [CatchPin] {
         [
             CatchPin(id: "A0:28:5D:A0:C4:C0", ssid: "HomeWiFi", lat: 45.0350, lon: 38.9750, date: 0),
