@@ -54,7 +54,7 @@ class _LinkWidget(_Widget):
 
 class Companion(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "1.0.0"
+    __version__ = "1.1.0"
     __license__ = "MIT"
     __description__ = "One plugin for the Pwn Companion app: Bluetooth + BLE + JSON API."
 
@@ -84,6 +84,7 @@ class Companion(plugins.Plugin):
         self._hs_dir = "/home/pi/handshakes"
         self._name = "pwnagotchi"
         self._shakes = 0
+        self._agent = None
         self._ble_script = "/home/pi/btlink_ble.py"
 
     # --- lifecycle ---------------------------------------------------------
@@ -104,6 +105,7 @@ class Companion(plugins.Plugin):
         logging.info("[companion] loaded")
 
     def on_ready(self, agent):
+        self._agent = agent
         try:
             cfg = agent.config()
             self._name = cfg.get("main", {}).get("name") or socket.gethostname()
@@ -535,6 +537,37 @@ class Companion(plugins.Plugin):
             return self._bg(["systemctl", "restart", "pwnagotchi"])
         return False
 
+    @staticmethod
+    def _have_net():
+        try:
+            socket.setdefaulttimeout(3)
+            socket.getaddrinfo("wpa-sec.stanev.org", 443)
+            return True
+        except Exception:
+            return False
+
+    def _upload_all(self):
+        wp = plugins.loaded.get("wpa-sec")
+        if not wp:
+            return False, "wpa-sec plugin not loaded"
+        if not getattr(wp, "ready", False):
+            return False, "wpa-sec not ready (api_key?)"
+        if self._agent is None:
+            return False, "agent not ready"
+        if not self._have_net():
+            return False, "no internet"
+        try:
+            wp.on_internet_available(self._agent)
+            return True, "wpa-sec upload + download triggered"
+        except Exception as e:
+            return False, str(e)
+
+    def _pcap_list(self):
+        try:
+            return sorted(f for f in os.listdir(self._hs_dir) if f.endswith(".pcap"))
+        except Exception:
+            return []
+
     def on_webhook(self, path, request):
         from flask import jsonify, abort
         action = request.args.get("action", "")
@@ -542,6 +575,18 @@ class Companion(plugins.Plugin):
             return jsonify(self._status())
         if action == "pwndex":
             return jsonify(self._pwndex())
+        if action == "upload_all":
+            ok, msg = self._upload_all()
+            return jsonify(ok=ok, msg=msg)
+        if action == "pcaps":
+            return jsonify(self._pcap_list())
+        if action == "pcap":
+            from flask import send_file
+            name = os.path.basename(request.args.get("name") or "")
+            p = os.path.join(self._hs_dir, name)
+            if name.endswith(".pcap") and os.path.isfile(p):
+                return send_file(p, as_attachment=True)
+            abort(404)
         if action == "set":
             mac = (request.args.get("mac") or "").upper()
             pw = request.args.get("pw") or ""

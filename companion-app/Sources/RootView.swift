@@ -327,7 +327,7 @@ struct ControlView: View {
                                         subtitle: "Networks + passwords → share") { exportPasswords() }
                             div
                             FunctionRow(icon: "arrow.up.circle", title: "Upload all hashes to wpa-sec",
-                                        subtitle: "Send all .pcap") { run("upload_all") }
+                                        subtitle: "Send all .pcap") { uploadAllHashes() }
                             div
                             FunctionRow(icon: "arrow.down.circle", title: "Download all hashes",
                                         subtitle: "Pull .pcap to phone") { run("download_all") }
@@ -381,6 +381,15 @@ struct ControlView: View {
         Task {
             let ok = (try? await PwnClient.control(conn, cmd: cmd)) ?? false
             toast = ok ? "✅ \(cmd) done" : "❌ \(cmd): needs a device endpoint (soon)"
+        }
+    }
+
+    private func uploadAllHashes() {
+        toast = "Uploading to wpa-sec…"
+        Task {
+            let (ok, msg) = await PwnClient.uploadAll(conn)
+            let m = msg.isEmpty ? (ok ? "done" : "failed") : msg
+            toast = (ok ? "✅ " : "❌ ") + m
         }
     }
 

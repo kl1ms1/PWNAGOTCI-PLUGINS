@@ -198,4 +198,19 @@ enum PwnClient {
         let (_, resp) = try await URLSession.shared.data(for: request(url, conn, timeout: 6))
         return (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
     }
+
+    /// Real wpa-sec upload trigger (companion action=upload_all). Returns (ok, message).
+    static func uploadAll(_ conn: ConnectionStore) async -> (Bool, String) {
+        if conn.demo { try? await Task.sleep(nanoseconds: 600_000_000); return (true, "demo: 17 hashes uploaded") }
+        guard let url = conn.companionURL("upload_all") else { return (false, "bad url") }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request(url, conn, timeout: 25))
+            if let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                return ((j["ok"] as? Bool) ?? false, (j["msg"] as? String) ?? "")
+            }
+            return (false, "bad response")
+        } catch {
+            return (false, "no connection")
+        }
+    }
 }
