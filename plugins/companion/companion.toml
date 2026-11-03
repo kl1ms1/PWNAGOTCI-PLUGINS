@@ -1,10 +1,17 @@
-# companion config. Copy into /etc/pwnagotchi/config.toml.
+# companion — THE single plugin for the Pwn Companion app.
+# Copy into /etc/pwnagotchi/config.toml. Enable ONLY this one (disable btlink).
 #
-# JSON API that powers the Pwn Companion app (live status, pwndex browse/edit,
-# device control). Open from the app, or test in a browser:
-#   http://<ip>:8080/plugins/companion/?action=status
+# It does Bluetooth (pair/pairable/PAN/status) + launches the BLE server
+# (btlink_ble.py) + the JSON API. Copy companion.py (and btlink_ble.py for BLE)
+# to the custom-plugins folder. From here on you only update the APP, not this.
 
 main.plugins.companion.enabled = true
 
-# Where pwndex stores its catalog (for the networks tab):
+# main.plugins.companion.alias = "pwnagotchi"      # Bluetooth name
+# main.plugins.companion.static_ip = "172.20.10.6" # fixed app IP over BT-PAN
+# main.plugins.companion.ble_script = "/home/pi/btlink_ble.py"
 # main.plugins.companion.pwndex = "/root/.pwndex/dex.json"
+# main.plugins.companion.label_position = "0,83"   # "[O][O] ip" line on the e-ink
+
+# turn the old split plugin OFF:
+main.plugins.btlink.enabled = false
