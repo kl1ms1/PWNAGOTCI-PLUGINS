@@ -140,10 +140,16 @@ struct DashView: View {
                             }.buttonStyle(.bordered).disabled(conn.baseURL == nil || conn.demo)
                         }
 
-                        NavigationLink { EventsView() } label: {
-                            Label("Events", systemImage: "list.bullet.rectangle")
-                                .frame(maxWidth: .infinity)
-                        }.buttonStyle(.bordered)
+                        HStack(spacing: 10) {
+                            NavigationLink { EventsView() } label: {
+                                Label("Events", systemImage: "list.bullet.rectangle")
+                                    .frame(maxWidth: .infinity)
+                            }.buttonStyle(.bordered)
+                            NavigationLink { FilesView() } label: {
+                                Label("Files", systemImage: "folder")
+                                    .frame(maxWidth: .infinity)
+                            }.buttonStyle(.bordered)
+                        }
                     }
                     .padding()
                 }

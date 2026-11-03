@@ -199,6 +199,25 @@ enum PwnClient {
         return (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
     }
 
+    static func fetchPcaps(_ conn: ConnectionStore) async -> [String] {
+        if conn.demo {
+            return ["HomeWiFi_a0285da0c4c0.pcap", "Xiaomi_67_504f3bcb39fe.pcap",
+                    "MGTS_GPON_112233445566.pcap", "CoffeeHouse_778899aabbcc.pcap"]
+        }
+        guard let url = conn.companionURL("pcaps") else { return [] }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request(url, conn))
+            return (try? JSONDecoder().decode([String].self, from: data)) ?? []
+        } catch { return [] }
+    }
+
+    static func pcapData(_ conn: ConnectionStore, _ name: String) async -> Data? {
+        if conn.demo { return Data("demo .pcap: \(name)".utf8) }
+        let e = name.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? name
+        guard let url = conn.companionURL("pcap", "&name=\(e)") else { return nil }
+        return try? await URLSession.shared.data(for: request(url, conn, timeout: 30)).0
+    }
+
     /// Real wpa-sec upload trigger (companion action=upload_all). Returns (ok, message).
     static func uploadAll(_ conn: ConnectionStore) async -> (Bool, String) {
         if conn.demo { try? await Task.sleep(nanoseconds: 600_000_000); return (true, "demo: 17 hashes uploaded") }
