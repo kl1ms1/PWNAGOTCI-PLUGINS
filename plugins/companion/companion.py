@@ -54,7 +54,7 @@ class _LinkWidget(_Widget):
 
 class Companion(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "1.3.0"
+    __version__ = "1.4.0"
     __license__ = "MIT"
     __description__ = "One plugin for the Pwn Companion app: Bluetooth + BLE + JSON API."
 
@@ -666,6 +666,66 @@ class Companion(plugins.Plugin):
             return False, str(e)
         return True, "%s=%s saved (restart to apply)" % (key, val)
 
+    def _whitelist_get(self):
+        try:
+            cfg = self._agent.config() if self._agent else {}
+            wl = (cfg.get("main", {}) or {}).get("whitelist", []) or []
+            return [str(x) for x in wl]
+        except Exception:
+            return []
+
+    def _whitelist_set(self, ssid, add):
+        import re
+        ssid = (ssid or "").strip()
+        if not ssid:
+            return False, "no ssid", self._whitelist_get()
+        p = self._config_path()
+        try:
+            with open(p, "r") as f:
+                lines = f.readlines()
+        except Exception as e:
+            return False, str(e), []
+        rx = re.compile(r'^\s*main\.whitelist\s*=\s*\[(.*)\]\s*$')
+        idx, items = None, []
+        for i, ln in enumerate(lines):
+            m = rx.match(ln)
+            if m:
+                idx = i
+                body = m.group(1).strip()
+                if body:
+                    items = [s.strip().strip('"').strip("'")
+                             for s in body.split(",") if s.strip()]
+                break
+        if idx is None:
+            # don't risk a duplicate key against a multi-line array
+            if self._whitelist_get():
+                return False, "multi-line whitelist — edit config.toml in Files", self._whitelist_get()
+        if add:
+            if ssid not in items:
+                items.append(ssid)
+        else:
+            items = [x for x in items if x != ssid]
+        newline = "main.whitelist = [%s]\n" % ", ".join('"%s"' % x for x in items)
+        if idx is not None:
+            lines[idx] = newline
+        else:
+            after = None
+            for i, ln in enumerate(lines):
+                if re.match(r'^\s*main\.', ln):
+                    after = i
+            lines.insert((after + 1) if after is not None else 0, newline)
+        try:
+            try:
+                import shutil
+                shutil.copy2(p, p + ".companion.bak")
+            except Exception:
+                pass
+            with open(p, "w") as f:
+                f.writelines(lines)
+        except Exception as e:
+            return False, str(e), items
+        return True, "whitelist updated (restart to apply)", items
+
     def on_webhook(self, path, request):
         from flask import jsonify, abort
         action = request.args.get("action", "")
@@ -741,6 +801,11 @@ class Companion(plugins.Plugin):
             on = (request.args.get("on") or "1") in ("1", "true", "True")
             ok, msg = self._plugin_set(name, on)
             return jsonify(ok=ok, msg=msg)
+        if action == "whitelist":
+            return jsonify(list=self._whitelist_get())
+        if action in ("wl_add", "wl_rm"):
+            ok, msg, lst = self._whitelist_set(request.args.get("ssid") or "", action == "wl_add")
+            return jsonify(ok=ok, msg=msg, list=lst)
         # --- file manager -------------------------------------------------
         if action == "fs_ls":
             return jsonify(self._fs_ls(request.args.get("path") or "/root"))

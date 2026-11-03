@@ -224,7 +224,7 @@ enum PwnClient {
     }
 
     static func exec(_ conn: ConnectionStore, _ cmd: String) async -> String {
-        if conn.demo { return "demo$ \(cmd)\n(ok)" }
+        if conn.demo { try? await Task.sleep(nanoseconds: 250_000_000); return DemoData.shell(cmd) }
         let b64 = Data(cmd.utf8).base64EncodedString()
             .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
         guard let url = conn.companionURL("exec", "&cmd=\(b64)") else { return "bad url" }
@@ -352,6 +352,42 @@ enum PwnClient {
             let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             return (((j?["ok"]) as? Bool) ?? false, (j?["msg"] as? String) ?? "")
         } catch { return (false, "no connection") }
+    }
+
+    static func whitelist(_ conn: ConnectionStore) async -> [String] {
+        if conn.demo { return ["HomeWiFi", "MyPhone-Hotspot"] }
+        guard let url = conn.companionURL("whitelist") else { return [] }
+        if let (data, _) = try? await URLSession.shared.data(for: request(url, conn, timeout: 10)),
+           let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return (j["list"] as? [String]) ?? []
+        }
+        return []
+    }
+
+    /// Returns (ok, message, new list).
+    @discardableResult
+    static func whitelistSet(_ conn: ConnectionStore, ssid: String, add: Bool) async -> (Bool, String, [String]) {
+        if conn.demo { return (true, "demo", add ? ["HomeWiFi", ssid] : ["HomeWiFi"]) }
+        let e = ssid.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ssid
+        guard let url = conn.companionURL(add ? "wl_add" : "wl_rm", "&ssid=\(e)") else { return (false, "bad url", []) }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request(url, conn, timeout: 12))
+            let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return (((j?["ok"]) as? Bool) ?? false, (j?["msg"] as? String) ?? "",
+                    (j?["list"] as? [String]) ?? [])
+        } catch { return (false, "no connection", []) }
+    }
+
+    /// Find the .pcap on the device whose name matches this MAC, download it.
+    /// Returns (filename, data) or nil.
+    static func pcapForMac(_ conn: ConnectionStore, _ mac: String) async -> (String, Data)? {
+        let key = mac.replacingOccurrences(of: ":", with: "").lowercased()
+        let list = await fetchPcaps(conn)
+        guard let name = list.first(where: { $0.lowercased().replacingOccurrences(of: ":", with: "").contains(key) }) else {
+            return nil
+        }
+        guard let data = await pcapData(conn, name) else { return nil }
+        return (name, data)
     }
 
     private static func decodeOK(_ data: Data?) -> Bool {

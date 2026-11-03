@@ -275,6 +275,8 @@ struct EditPwSheet: View {
     let onSave: (String) -> Void
     @State private var pw: String
     @State private var msg = ""
+    @State private var busy = false
+    @State private var shareURL: URL?
     @Environment(\.dismiss) private var dismiss
     init(item: NetItem, onSave: @escaping (String) -> Void) {
         self.item = item; self.onSave = onSave; _pw = State(initialValue: item.pw)
@@ -293,21 +295,57 @@ struct EditPwSheet: View {
                     }
                 }
                 Section("Actions") {
-                    actionRow("Download hash (.pcap)", "arrow.down.doc", "Hash downloaded")
-                    actionRow("Add to whitelist", "checkmark.shield", "To whitelist")
-                    actionRow("Upload to wpa-sec", "arrow.up.circle", "Sent to wpa-sec")
+                    Button { downloadHash() } label: { Label("Download hash (.pcap)", systemImage: "arrow.down.doc") }
+                    Button { setWhitelist(true) } label: { Label("Add to whitelist", systemImage: "checkmark.shield") }
+                    Button { setWhitelist(false) } label: { Label("Remove from whitelist", systemImage: "shield.slash") }
+                    Button { uploadOne() } label: { Label("Upload to wpa-sec", systemImage: "arrow.up.circle") }
                 }
+                if busy { Section { HStack { ProgressView(); Text("Working…").foregroundStyle(.secondary) } } }
                 if !msg.isEmpty {
-                    Section { Text("✅ " + msg + (conn.demo ? " (demo)" : "")).foregroundStyle(.secondary) }
+                    Section { Text(msg + (conn.demo ? " (demo)" : "")).foregroundStyle(.secondary) }
                 }
             }
             .navigationTitle(item.ssid).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .sheet(item: $shareURL) { url in ActivityView(items: [url]) }
         }
     }
 
-    private func actionRow(_ title: String, _ icon: String, _ done: String) -> some View {
-        Button { msg = done } label: { Label(title, systemImage: icon) }
+    private func downloadHash() {
+        busy = true; msg = ""
+        Task {
+            defer { busy = false }
+            if conn.demo {
+                let url = FileManager.default.temporaryDirectory
+                    .appendingPathComponent("\(item.ssid)_\(item.mac.replacingOccurrences(of: ":", with: "")).pcap")
+                try? Data("demo handshake".utf8).write(to: url)
+                shareURL = url; return
+            }
+            guard let (name, data) = await PwnClient.pcapForMac(conn, item.mac) else {
+                msg = "❌ No .pcap found for this network yet"; return
+            }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            try? data.write(to: url)
+            shareURL = url
+        }
+    }
+
+    private func setWhitelist(_ add: Bool) {
+        busy = true; msg = ""
+        Task {
+            defer { busy = false }
+            let (ok, m, list) = await PwnClient.whitelistSet(conn, ssid: item.ssid, add: add)
+            msg = (ok ? "✅ " : "❌ ") + (m.isEmpty ? "done" : m) + (ok ? "\nWhitelist: \(list.joined(separator: ", "))" : "")
+        }
+    }
+
+    private func uploadOne() {
+        busy = true; msg = ""
+        Task {
+            defer { busy = false }
+            let (ok, m) = await PwnClient.uploadAll(conn)
+            msg = (ok ? "✅ " : "❌ ") + (m.isEmpty ? "triggered wpa-sec upload" : m)
+        }
     }
 }
 
@@ -432,6 +470,7 @@ struct ControlView: View {
 
 struct SettingsView: View {
     @EnvironmentObject var conn: ConnectionStore
+    @State private var editConfig = false
     var body: some View {
         NavigationStack {
             Form {
@@ -440,6 +479,9 @@ struct SettingsView: View {
                         Text("Mode"); Spacer()
                         Text(conn.demo ? "DEMO (Beta)" : "Connection")
                             .foregroundStyle(.secondary)
+                    }
+                    Button { editConfig = true } label: {
+                        Label("Edit config.toml", systemImage: "doc.text")
                     }
                     Button(role: .destructive) {
                         conn.entered = false
@@ -478,6 +520,9 @@ struct SettingsView: View {
                 }
             }
             .navigationTitle("Settings")
+            .sheet(isPresented: $editConfig) {
+                FileSheet(path: "/etc/pwnagotchi/config.toml") {}
+            }
         }
     }
 }

@@ -40,6 +40,39 @@ enum DemoData {
         ]
     }
 
+    /// Believable shell output for the demo terminal (so beta feels real).
+    static func shell(_ raw: String) -> String {
+        let cmd = raw.trimmingCharacters(in: .whitespaces)
+        let l = cmd.lowercased()
+        func has(_ s: String) -> Bool { l.contains(s) }
+
+        if l == "ls" || l.hasPrefix("ls ") {
+            if has("/etc/pwnagotchi") { return "config.toml\nconfig.toml.companion.bak\nlog" }
+            if has("handshake") { return "HomeWiFi_a0285da0c4c0.pcap\nXiaomi_67_504f3bcb39fe.pcap\nMGTS_GPON_112233445566.pcap" }
+            if has("/home/pi") { return "handshakes  scripts  .bashrc  .profile" }
+            return "brain.json  btlink_ble.py  handshakes  .pwndex"
+        }
+        if has("uptime") { return " 20:13:02 up 2:02,  1 user,  load average: 0.41, 0.33, 0.29" }
+        if has("temp") { return "temp=47.3'C" }
+        if has("df") { return "Filesystem      Size  Used Avail Use% Mounted on\n/dev/mmcblk0p2   29G   18G  9.4G  66% /" }
+        if has("free") { return "               total        used        free\nMem:           452Mi       262Mi       118Mi\nSwap:          100Mi        12Mi        88Mi" }
+        if has("pwnagotchi.log") || has("journalctl") {
+            return "[demo] 20:12:58 wifi: deauth → Xiaomi_67 (50:4F:3B:CB:39:FE)\n[demo] 20:12:59 wifi: handshake HomeWiFi captured\n[demo] 20:13:01 ai: reward 1.42, epoch 318\n[demo] 20:13:02 ui: face (⌐■_■)" }
+        if has("handshakes") && has("wc") { return "17" }
+        if has("iwconfig") || has("ip -br") || has("ip link") {
+            return "wlan0mon  IEEE 802.11  Mode:Monitor  Frequency:2.437 GHz  Tx-Power=31 dBm" }
+        if has("i2cget") { return "0x5a3c" }
+        if has("bluetoothctl") || has("hciconfig") { return "Powered: yes\nDiscoverable: yes\nPairable: yes" }
+        if has("whoami") { return "root" }
+        if has("hostname") { return "Ki213" }
+        if has("config.toml") && has("grep") {
+            return "main.plugins.companion.enabled = true\nmain.plugins.wpa-sec.enabled = true\nmain.plugins.grid.enabled = true" }
+        if has("restart") || has("pwnkill") { return "[demo] pwnagotchi.service restarted" }
+        if has("reboot") { return "[demo] rebooting…" }
+        if has("uname") { return "Linux Ki213 6.6.31+rpt-rpi-v8 aarch64 GNU/Linux" }
+        return "[demo] executed: \(cmd)"
+    }
+
     /// Fake root filesystem for the demo file browser.
     static func fsListing(_ path: String) -> FsListing {
         let tree: [String: [FileEntry]] = [
