@@ -71,6 +71,10 @@ class BTLink(plugins.Plugin):
         self._phone_mac = ""
         self._pan_iface = "bnep0"
         self._pan_ip = ""
+        self._static_ip = "172.20.10.6"   # fixed IP on the phone's BT-PAN
+        self._gw = "172.20.10.1"
+        self._disc = False
+        self._pair = False
         self._passkey = ""            # shown full-screen while pairing
         self._passkey_at = 0.0
         self._added = False
@@ -89,6 +93,7 @@ class BTLink(plugins.Plugin):
         self._auto_pan = bool(o.get("auto_pan", True))
         self._phone_mac = str(o.get("phone_mac", "") or "").upper().strip()
         self._pan_iface = o.get("pan_iface", self._pan_iface)
+        self._static_ip = o.get("static_ip", self._static_ip)
         pos = o.get("label_position", "0,83")
         try:
             x, y = str(pos).split(",")
@@ -136,15 +141,18 @@ class BTLink(plugins.Plugin):
         manual mode: keep the pairing agent alive + Pairable on, and join PAN."""
         while True:
             try:
-                # keep the persistent agent alive and re-assert pairable via it
-                if not self._iface_ip():
+                self._pan_ip = self._iface_ip()
+                if not self._pan_ip:
                     self._assert_pairable()                # keep Pairable on (btmgmt)
+                    self._ensure_pan()
                 if self._btctl_proc is not None and self._btctl_proc.poll() is not None:
                     self._start_btctl_agent()              # agent died -> relaunch
-                self._ensure_pan()
+                ok, out = self._sh(["bluetoothctl", "show"])
+                self._disc = "Discoverable: yes" in out
+                self._pair = "Pairable: yes" in out
             except Exception:
                 logging.debug("[btlink] keepalive tick failed")
-            time.sleep(20)
+            time.sleep(15)
 
     # --- pairing agent -----------------------------------------------------
     def _start_agent(self):
@@ -232,6 +240,13 @@ class BTLink(plugins.Plugin):
         except Exception:
             logging.exception("[btlink] agent loop failed")
 
+    def _status_text(self):
+        """Compact live status for the e-ink: [discoverable][pairable] + IP.
+        O = on, x = off; then the fixed PAN IP (or 'no ip' until linked)."""
+        d = "O" if self._disc else "x"
+        p = "O" if self._pair else "x"
+        return "[%s][%s] %s" % (d, p, self._pan_ip if self._pan_ip else "no ip")
+
     def _on_passkey(self, code):
         self._passkey = code
         self._passkey_at = time.time()
@@ -277,11 +292,16 @@ class BTLink(plugins.Plugin):
                   "/org/bluez/hci0/" + dev, "org.bluez.Network1.Connect", "string:nap"],
                  timeout=20)
         time.sleep(3)
-        self._sh(["dhclient", "-1", self._pan_iface], timeout=25)
-        ip = self._iface_ip()
-        if ip:
-            self._pan_ip = ip
-            logging.info("[btlink] PAN up: %s", ip)
+        # assign a FIXED ip on bnep0 so the app always uses the same address
+        ok, _ = self._sh(["ip", "link", "show", self._pan_iface])
+        if ok:
+            self._sh(["ip", "addr", "flush", "dev", self._pan_iface])
+            self._sh(["ip", "addr", "add", self._static_ip + "/24", "dev", self._pan_iface])
+            self._sh(["ip", "link", "set", self._pan_iface, "up"])
+            ip = self._iface_ip()
+            if ip:
+                self._pan_ip = ip
+                logging.info("[btlink] PAN up (static): %s", ip)
 
     # --- e-ink -------------------------------------------------------------
     def on_ui_setup(self, ui):
@@ -289,7 +309,7 @@ class BTLink(plugins.Plugin):
         if LabeledValue is not None:
             try:
                 ui.add_element("btlabel", LabeledValue(
-                    color=BLACK, label="BT:", value=self._alias,
+                    color=BLACK, label="", value="[x][x] no ip",
                     position=self._label_pos,
                     label_font=getattr(fonts, "Bold", None),
                     text_font=getattr(fonts, "Small", None)))
@@ -308,7 +328,7 @@ class BTLink(plugins.Plugin):
         # keep the small "BT:" line current (nick, or the IP once linked)
         if self._label_added:
             try:
-                ui.set("btlabel", self._pan_ip if self._pan_ip else self._alias)
+                ui.set("btlabel", self._status_text())
             except Exception:
                 pass
         if not self._added:
