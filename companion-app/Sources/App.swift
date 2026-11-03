@@ -6,10 +6,16 @@ struct PwnCompanionApp: App {
     @StateObject private var conn = ConnectionStore()
     var body: some Scene {
         WindowGroup {
-            RootView()
-                .environmentObject(conn)
-                .preferredColorScheme(conn.theme.scheme)
-                .tint(.primary)
+            Group {
+                if conn.entered {
+                    RootView()
+                } else {
+                    ConnectView()
+                }
+            }
+            .environmentObject(conn)
+            .preferredColorScheme(conn.theme.scheme)
+            .tint(.primary)
         }
     }
 }
@@ -29,6 +35,8 @@ final class ConnectionStore: ObservableObject {
     @Published var user: String { didSet { save() } }
     @Published var pass: String { didSet { save() } }
     @Published var theme: AppTheme { didSet { save() } }
+    @Published var entered = false     // passed the connect screen
+    @Published var demo = false        // demo/beta mode (fake data, no device)
 
     init() {
         let d = UserDefaults.standard
@@ -93,6 +101,7 @@ enum PwnClient {
     }
 
     static func fetchUIImage(_ conn: ConnectionStore) async throws -> UIImage {
+        if conn.demo { try? await Task.sleep(nanoseconds: 300_000_000); return DemoData.faceImage() }
         guard let url = conn.uiImageURL else { throw URLError(.badURL) }
         let (data, resp) = try await URLSession.shared.data(for: request(url, conn))
         guard let http = resp as? HTTPURLResponse, (200..<300).contains(http.statusCode),
@@ -101,12 +110,14 @@ enum PwnClient {
     }
 
     static func fetchStatus(_ conn: ConnectionStore) async throws -> DeviceStatus {
+        if conn.demo { return DemoData.status() }
         guard let url = conn.companionURL("status") else { throw URLError(.badURL) }
         let (data, _) = try await URLSession.shared.data(for: request(url, conn))
         return try JSONDecoder().decode(DeviceStatus.self, from: data)
     }
 
     static func fetchPwndex(_ conn: ConnectionStore) async throws -> [NetItem] {
+        if conn.demo { return DemoData.pwndex() }
         guard let url = conn.companionURL("pwndex") else { throw URLError(.badURL) }
         let (data, _) = try await URLSession.shared.data(for: request(url, conn))
         return try JSONDecoder().decode([NetItem].self, from: data)
@@ -114,6 +125,7 @@ enum PwnClient {
 
     @discardableResult
     static func setPassword(_ conn: ConnectionStore, mac: String, pw: String) async throws -> Bool {
+        if conn.demo { return true }
         let e = { (s: String) in s.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? s }
         guard let url = conn.companionURL("set", "&mac=\(e(mac))&pw=\(e(pw))") else { throw URLError(.badURL) }
         let (_, resp) = try await URLSession.shared.data(for: request(url, conn))
@@ -122,6 +134,7 @@ enum PwnClient {
 
     @discardableResult
     static func control(_ conn: ConnectionStore, cmd: String) async throws -> Bool {
+        if conn.demo { try? await Task.sleep(nanoseconds: 400_000_000); return true }
         guard let url = conn.companionURL("control", "&cmd=\(cmd)") else { throw URLError(.badURL) }
         let (_, resp) = try await URLSession.shared.data(for: request(url, conn, timeout: 6))
         return (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false

@@ -332,6 +332,19 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
+                Section("Устройство") {
+                    HStack {
+                        Text("Режим"); Spacer()
+                        Text(conn.demo ? "ДЕМО (Beta)" : "Подключение")
+                            .foregroundStyle(.secondary)
+                    }
+                    Button(role: .destructive) {
+                        conn.entered = false
+                        conn.demo = false
+                    } label: {
+                        Label("Сменить устройство / выход", systemImage: "arrow.left.circle")
+                    }
+                }
                 Section("Вид") {
                     Picker("Тема", selection: $conn.theme) {
                         ForEach(AppTheme.allCases) { t in Text(t.label).tag(t) }

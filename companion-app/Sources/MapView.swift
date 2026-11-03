@@ -81,11 +81,13 @@ struct MapView: View {
         span: MKCoordinateSpan(latitudeDelta: 0.05, longitudeDelta: 0.05))
     @State private var centered = false
 
+    private var pins: [CatchPin] { conn.demo ? DemoData.pins() : store.pins }
+
     var body: some View {
         NavigationStack {
             ZStack(alignment: .bottom) {
                 Map(coordinateRegion: $region, showsUserLocation: true,
-                    annotationItems: store.pins) { pin in
+                    annotationItems: pins) { pin in
                     MapAnnotation(coordinate: pin.coord) {
                         VStack(spacing: 2) {
                             Image(systemName: "wifi")
@@ -104,7 +106,7 @@ struct MapView: View {
                 GlassCard {
                     HStack {
                         Image(systemName: "mappin.and.ellipse").foregroundStyle(.primary)
-                        Text("Уловов на карте: \(store.pins.count)")
+                        Text("Уловов на карте: \(pins.count)")
                             .font(.subheadline)
                         Spacer()
                         Button {
@@ -122,6 +124,13 @@ struct MapView: View {
             .toolbarColorScheme(.dark, for: .navigationBar)
         }
         .task {
+            if conn.demo {
+                if let first = DemoData.pins().first {
+                    region = MKCoordinateRegion(center: first.coord,
+                        span: MKCoordinateSpan(latitudeDelta: 0.02, longitudeDelta: 0.02))
+                }
+                return
+            }
             loc.start()
             while !Task.isCancelled {
                 if !centered, let c = loc.coord {
