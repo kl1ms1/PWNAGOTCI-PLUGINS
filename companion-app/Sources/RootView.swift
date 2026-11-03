@@ -59,6 +59,68 @@ struct FunctionRow: View {
     }
 }
 
+/// Like FunctionRow but pushes a destination (used by the Control hub).
+struct NavRow<Destination: View>: View {
+    let icon: String
+    let title: String
+    let subtitle: String
+    @ViewBuilder let destination: () -> Destination
+    var body: some View {
+        NavigationLink {
+            destination()
+        } label: {
+            HStack(spacing: 14) {
+                Image(systemName: icon)
+                    .font(.system(size: 18, weight: .semibold)).foregroundStyle(.primary)
+                    .frame(width: 38, height: 38)
+                    .background(.primary.opacity(0.10), in: RoundedRectangle(cornerRadius: 11, style: .continuous))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title).font(.body.weight(.semibold)).foregroundStyle(.primary)
+                    Text(subtitle).font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                Image(systemName: "chevron.right").font(.caption).foregroundStyle(.tertiary)
+            }
+            .padding(.vertical, 10).padding(.horizontal, 14)
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+/// Tiny line chart for a rolling metric history.
+struct Sparkline: View {
+    let values: [Double]
+    let label: String
+    let current: String
+    var body: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            HStack {
+                Text(label).font(.caption2).foregroundStyle(.secondary)
+                Spacer()
+                Text(current).font(.caption.weight(.semibold))
+            }
+            GeometryReader { geo in
+                Path { p in
+                    guard values.count > 1 else { return }
+                    let maxV = values.max() ?? 1, minV = values.min() ?? 0
+                    let range = Swift.max(maxV - minV, 0.001)
+                    let stepX = geo.size.width / CGFloat(values.count - 1)
+                    for (i, v) in values.enumerated() {
+                        let x = CGFloat(i) * stepX
+                        let y = geo.size.height * (1 - CGFloat((v - minV) / range))
+                        if i == 0 { p.move(to: CGPoint(x: x, y: y)) }
+                        else { p.addLine(to: CGPoint(x: x, y: y)) }
+                    }
+                }.stroke(Color.primary, style: StrokeStyle(lineWidth: 1.5, lineJoin: .round))
+            }.frame(height: 30)
+        }
+        .frame(maxWidth: .infinity)
+        .padding(10)
+        .background(.ultraThinMaterial, in: RoundedRectangle(cornerRadius: 12, style: .continuous))
+        .overlay(RoundedRectangle(cornerRadius: 12, style: .continuous).strokeBorder(.primary.opacity(0.08), lineWidth: 1))
+    }
+}
+
 func uptimeStr(_ s: Int?) -> String {
     let s = s ?? 0
     let d = s / 86400, h = (s % 86400) / 3600, m = (s % 3600) / 60
@@ -91,6 +153,9 @@ struct DashView: View {
     @State private var online = false
     @State private var showWeb = false
     @State private var lastShakes: Int?
+    @State private var cpuHist: [Double] = []
+    @State private var tempHist: [Double] = []
+    @State private var memHist: [Double] = []
 
     var body: some View {
         NavigationStack {
@@ -130,6 +195,17 @@ struct DashView: View {
                             StatTile(label: "CPU", value: st.cpu.map { String(format: "%.0f%%", $0) } ?? "—")
                             StatTile(label: "RAM", value: st.mem.map { String(format: "%.0f%%", $0) } ?? "—")
                             StatTile(label: "SD GB", value: st.sd_free.map { String(format: "%.0f", $0) } ?? "—")
+                        }
+
+                        if cpuHist.count > 1 {
+                            HStack(spacing: 10) {
+                                Sparkline(values: cpuHist, label: "CPU %",
+                                          current: st.cpu.map { String(format: "%.0f", $0) } ?? "—")
+                                Sparkline(values: tempHist, label: "Temp °",
+                                          current: st.temp.map { String(format: "%.0f", $0) } ?? "—")
+                                Sparkline(values: memHist, label: "RAM %",
+                                          current: st.mem.map { String(format: "%.0f", $0) } ?? "—")
+                            }
                         }
 
                         HStack(spacing: 10) {
@@ -194,6 +270,9 @@ struct DashView: View {
                 Notify.fire("New handshake", "\(now - prev) new on \(s.name ?? "pwnagotchi") · \(now) total")
             }
             lastShakes = s.shakes
+            if let c = s.cpu { cpuHist.append(c); if cpuHist.count > 30 { cpuHist.removeFirst() } }
+            if let t = s.temp { tempHist.append(t); if tempHist.count > 30 { tempHist.removeFirst() } }
+            if let m = s.mem { memHist.append(m); if memHist.count > 30 { memHist.removeFirst() } }
         }
     }
 }
@@ -367,6 +446,19 @@ struct ControlView: View {
                         if !toast.isEmpty {
                             GlassCard { Text(toast).font(.footnote).foregroundStyle(.secondary) }
                         }
+                        section("Screens") {
+                            NavRow(icon: "terminal", title: "Commands (SSH)", subtitle: "Run shell commands") { CommandsView() }
+                            div
+                            NavRow(icon: "puzzlepiece.extension", title: "Plugins", subtitle: "Enable/disable, open pages") { PluginsView() }
+                            div
+                            NavRow(icon: "folder", title: "Files", subtitle: "Browse / edit the filesystem") { FilesView() }
+                            div
+                            NavRow(icon: "list.bullet.rectangle", title: "Events", subtitle: "Live log from the device") { EventsView() }
+                            div
+                            NavRow(icon: "face.smiling", title: "Faces", subtitle: "Customize the screen faces") { FacesView() }
+                            div
+                            NavRow(icon: "stethoscope", title: "Diagnostics", subtitle: "One-tap health checks") { DiagnosticsView() }
+                        }
                         section("Mode") {
                             FunctionRow(icon: "bolt.horizontal.circle", title: "Auto Mode",
                                         subtitle: "Normal hunting") { run("auto") }
@@ -393,6 +485,18 @@ struct ControlView: View {
                             div
                             FunctionRow(icon: "arrow.down.circle", title: "Download all hashes",
                                         subtitle: "Pull .pcap to phone") { run("download_all") }
+                        }
+                        section("Recovery") {
+                            FunctionRow(icon: "dot.radiowaves.left.and.right", title: "Fix Bluetooth",
+                                        subtitle: "Make pairable + restart BT") {
+                                shell("sudo btmgmt pairable on; sudo btmgmt connectable on; sudo systemctl restart bluetooth; echo done", "Bluetooth") }
+                            div
+                            FunctionRow(icon: "wifi.exclamationmark", title: "Self-heal wlan0",
+                                        subtitle: "Recover brcmfmac / restart") {
+                                shell("sudo systemctl restart pwnagotchi; echo restarting", "wlan0") }
+                            div
+                            FunctionRow(icon: "arrow.triangle.2.circlepath", title: "Sync wpa-sec now",
+                                        subtitle: "Trigger upload + download") { uploadAllHashes() }
                         }
                         section("Interface") {
                             FunctionRow(icon: "globe", title: "Pwnagotchi Web UI",
@@ -443,6 +547,14 @@ struct ControlView: View {
         Task {
             let ok = (try? await PwnClient.control(conn, cmd: cmd)) ?? false
             toast = ok ? "✅ \(cmd) done" : "❌ \(cmd): needs a device endpoint (soon)"
+        }
+    }
+
+    private func shell(_ cmd: String, _ label: String) {
+        toast = "\(label): running…"
+        Task {
+            let out = await PwnClient.exec(conn, cmd)
+            toast = "\(label): " + (out.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty ? "done" : out.trimmingCharacters(in: .whitespacesAndNewlines).suffix(80).description)
         }
     }
 

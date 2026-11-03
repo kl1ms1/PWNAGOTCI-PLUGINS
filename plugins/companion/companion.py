@@ -54,7 +54,7 @@ class _LinkWidget(_Widget):
 
 class Companion(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "1.5.0"
+    __version__ = "1.6.0"
     __license__ = "MIT"
     __description__ = "One plugin for the Pwn Companion app: Bluetooth + BLE + JSON API."
 
@@ -666,6 +666,50 @@ class Companion(plugins.Plugin):
             return False, str(e)
         return True, "%s=%s saved (restart to apply)" % (key, val)
 
+    def _events(self, n=50):
+        import re
+        text = ""
+        for p in ("/var/log/pwnagotchi.log", "/home/pi/logs/pwnagotchi.log"):
+            try:
+                with open(p, "r", errors="ignore") as f:
+                    text = f.read()[-24000:]
+                if text:
+                    break
+            except Exception:
+                text = ""
+        if not text:
+            try:
+                r = subprocess.run(["journalctl", "-u", "pwnagotchi", "-n", str(n),
+                                    "--no-pager", "-o", "short-iso"],
+                                   capture_output=True, text=True, timeout=8)
+                text = r.stdout or ""
+            except Exception:
+                text = ""
+        out = []
+        lines = [l for l in text.splitlines() if l.strip()][-n:]
+        for l in lines:
+            low = l.lower()
+            if "deauth" in low:
+                kind = "deauth"
+            elif "handshake" in low or "captured" in low:
+                kind = "handshake"
+            elif "associat" in low:
+                kind = "assoc"
+            elif "wpa-sec" in low or "upload" in low:
+                kind = "upload"
+            elif "bus is down" in low or "error" in low or "exception" in low or "traceback" in low:
+                kind = "error"
+            elif "epoch" in low or "reward" in low:
+                kind = "ai"
+            elif "new peer" in low or "grid" in low:
+                kind = "peer"
+            else:
+                kind = "info"
+            m = re.search(r'(\d{2}:\d{2}:\d{2})', l)
+            out.append({"time": m.group(1) if m else "", "kind": kind, "text": l[-200:]})
+        out.reverse()
+        return out
+
     def _cfg_get(self, key):
         try:
             cfg = self._agent.config() if self._agent else {}
@@ -857,6 +901,8 @@ class Companion(plugins.Plugin):
             on = (request.args.get("on") or "1") in ("1", "true", "True")
             ok, msg = self._plugin_set(name, on)
             return jsonify(ok=ok, msg=msg)
+        if action == "events":
+            return jsonify(self._events())
         if action == "cfg_get":
             return jsonify(ok=True, key=request.args.get("key") or "",
                            value=self._cfg_get(request.args.get("key") or ""))

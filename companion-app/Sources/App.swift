@@ -174,6 +174,25 @@ struct FsListing: Codable {
     var err: String?
 }
 
+struct LogEvent: Codable, Identifiable {
+    var time: String
+    var kind: String
+    var text: String
+    var id: String { time + text }
+    var icon: String {
+        switch kind {
+        case "deauth": return "antenna.radiowaves.left.and.right"
+        case "handshake": return "hand.wave.fill"
+        case "assoc": return "person.2.fill"
+        case "upload": return "arrow.up.circle"
+        case "error": return "exclamationmark.triangle.fill"
+        case "ai": return "brain.head.profile"
+        case "peer": return "person.3.fill"
+        default: return "circle.fill"
+        }
+    }
+}
+
 // MARK: - Client
 
 enum PwnClient {
@@ -352,6 +371,15 @@ enum PwnClient {
             let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             return (((j?["ok"]) as? Bool) ?? false, (j?["msg"] as? String) ?? "")
         } catch { return (false, "no connection") }
+    }
+
+    static func fetchEvents(_ conn: ConnectionStore) async -> [LogEvent] {
+        if conn.demo { return DemoData.logEvents() }
+        guard let url = conn.companionURL("events") else { return [] }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request(url, conn, timeout: 12))
+            return (try? JSONDecoder().decode([LogEvent].self, from: data)) ?? []
+        } catch { return [] }
     }
 
     /// Generic config.toml read (returns the raw JSON value as Any?).

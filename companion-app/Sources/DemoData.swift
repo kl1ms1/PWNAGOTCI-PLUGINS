@@ -32,6 +32,19 @@ enum DemoData {
         ]
     }
 
+    static func logEvents() -> [LogEvent] {
+        [
+            LogEvent(time: "12:03:41", kind: "deauth", text: "wifi: deauth → Xiaomi_67 (50:4F:3B:CB:39:FE) ch6"),
+            LogEvent(time: "12:03:40", kind: "assoc", text: "wifi: associate → Keenetic-home"),
+            LogEvent(time: "12:03:38", kind: "handshake", text: "wifi: handshake captured: HomeWiFi"),
+            LogEvent(time: "12:03:12", kind: "info", text: "wifi: new network MGTS_GPON (ch11)"),
+            LogEvent(time: "12:02:55", kind: "upload", text: "wpa-sec: uploaded 2 .pcap"),
+            LogEvent(time: "12:02:10", kind: "ai", text: "ai: epoch 318, reward 1.42"),
+            LogEvent(time: "12:01:40", kind: "peer", text: "grid: new peer seen (f.0e7a)"),
+            LogEvent(time: "12:00:02", kind: "info", text: "mode: AUTO, hunting started"),
+        ]
+    }
+
     static func pins() -> [CatchPin] {
         [
             CatchPin(id: "A0:28:5D:A0:C4:C0", ssid: "HomeWiFi", lat: 45.0350, lon: 38.9750, date: 0),
