@@ -90,6 +90,7 @@ struct DashView: View {
     @State private var status = "Connecting…"
     @State private var online = false
     @State private var showWeb = false
+    @State private var lastShakes: Int?
 
     var body: some View {
         NavigationStack {
@@ -150,6 +151,17 @@ struct DashView: View {
                                     .frame(maxWidth: .infinity)
                             }.buttonStyle(.bordered)
                         }
+
+                        HStack(spacing: 10) {
+                            NavigationLink { CommandsView() } label: {
+                                Label("Commands", systemImage: "terminal")
+                                    .frame(maxWidth: .infinity)
+                            }.buttonStyle(.bordered)
+                            NavigationLink { PluginsView() } label: {
+                                Label("Plugins", systemImage: "puzzlepiece.extension")
+                                    .frame(maxWidth: .infinity)
+                            }.buttonStyle(.bordered)
+                        }
                     }
                     .padding()
                 }
@@ -159,7 +171,7 @@ struct DashView: View {
                 if let url = conn.baseURL { WebUISheet(url: url, user: conn.user, pass: conn.pass) }
             }
         }
-        .task { await loop() }
+        .task { if conn.notify { Notify.requestAuth() }; await loop() }
     }
 
     private func loop() async {
@@ -176,7 +188,13 @@ struct DashView: View {
         } catch {
             online = false; status = "No link"
         }
-        if let s = try? await PwnClient.fetchStatus(conn) { st = s }
+        if let s = try? await PwnClient.fetchStatus(conn) {
+            st = s
+            if conn.notify, let now = s.shakes, let prev = lastShakes, now > prev {
+                Notify.fire("New handshake", "\(now - prev) new on \(s.name ?? "pwnagotchi") · \(now) total")
+            }
+            lastShakes = s.shakes
+        }
     }
 }
 
@@ -438,6 +456,12 @@ struct SettingsView: View {
                         ForEach(FontStyle.allCases) { f in Text(f.label).tag(f) }
                     }
                     ColorPicker("Device screen color", selection: $conn.faceColor, supportsOpacity: false)
+                }
+                Section("Notifications") {
+                    Toggle("Alert on new handshakes", isOn: $conn.notify)
+                        .onChange(of: conn.notify) { on in if on { Notify.requestAuth() } }
+                    Text("A local alert fires when the device catches new handshakes while the app is open on the Dash tab.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("Connection") {
                     LabeledField("Device IP", text: $conn.host)

@@ -81,6 +81,7 @@ final class ConnectionStore: ObservableObject {
     @Published var skin: Skin { didSet { save() } }
     @Published var faceColor: Color { didSet { save() } }   // any color (Apple picker)
     @Published var font: FontStyle { didSet { save() } }
+    @Published var notify: Bool { didSet { save() } }   // local alerts on new handshakes
     @Published var entered = false     // passed the connect screen
     @Published var demo = false        // demo/beta mode (fake data, no device)
 
@@ -97,6 +98,7 @@ final class ConnectionStore: ObservableObject {
         let fb = d.object(forKey: "faceB") as? Double ?? 1.0
         faceColor = Color(red: fr, green: fg, blue: fb)
         font = FontStyle(rawValue: d.string(forKey: "font") ?? "") ?? .rounded
+        notify = d.object(forKey: "notify") as? Bool ?? false
     }
 
     var faceUIColor: UIColor { UIColor(faceColor) }
@@ -111,6 +113,7 @@ final class ConnectionStore: ObservableObject {
         UIColor(faceColor).getRed(&r, green: &g, blue: &b, alpha: &a)
         d.set(Double(r), forKey: "faceR"); d.set(Double(g), forKey: "faceG"); d.set(Double(b), forKey: "faceB")
         d.set(font.rawValue, forKey: "font")
+        d.set(notify, forKey: "notify")
     }
 
     var baseURL: URL? { URL(string: "http://\(host):\(port)") }
@@ -148,6 +151,13 @@ struct NetItem: Codable, Identifiable {
     var last: Double?
     var pw_at: Double?
     var id: String { mac }
+}
+
+struct PluginItem: Codable, Identifiable {
+    var name: String
+    var enabled: Bool
+    var path: String
+    var id: String { name }
 }
 
 // MARK: - Client
@@ -197,6 +207,35 @@ enum PwnClient {
         guard let url = conn.companionURL("control", "&cmd=\(cmd)") else { throw URLError(.badURL) }
         let (_, resp) = try await URLSession.shared.data(for: request(url, conn, timeout: 6))
         return (resp as? HTTPURLResponse).map { (200..<300).contains($0.statusCode) } ?? false
+    }
+
+    static func exec(_ conn: ConnectionStore, _ cmd: String) async -> String {
+        if conn.demo { return "demo$ \(cmd)\n(ok)" }
+        let b64 = Data(cmd.utf8).base64EncodedString()
+            .addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? ""
+        guard let url = conn.companionURL("exec", "&cmd=\(b64)") else { return "bad url" }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request(url, conn, timeout: 30))
+            if let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+                return (j["out"] as? String) ?? ""
+            }
+            return "bad response"
+        } catch { return "no connection" }
+    }
+
+    static func fetchPlugins(_ conn: ConnectionStore) async -> [PluginItem] {
+        if conn.demo {
+            return [PluginItem(name: "companion", enabled: true, path: "/plugins/companion/"),
+                    PluginItem(name: "pwndex", enabled: true, path: "/plugins/pwndex/"),
+                    PluginItem(name: "vslider", enabled: true, path: "/plugins/vslider/"),
+                    PluginItem(name: "wpa-sec", enabled: true, path: "/plugins/wpa-sec/"),
+                    PluginItem(name: "bootlogo", enabled: false, path: "/plugins/bootlogo/")]
+        }
+        guard let url = conn.companionURL("plugins") else { return [] }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request(url, conn))
+            return (try? JSONDecoder().decode([PluginItem].self, from: data)) ?? []
+        } catch { return [] }
     }
 
     static func fetchPcaps(_ conn: ConnectionStore) async -> [String] {

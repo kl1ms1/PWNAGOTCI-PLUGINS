@@ -54,7 +54,7 @@ class _LinkWidget(_Widget):
 
 class Companion(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "1.1.0"
+    __version__ = "1.2.0"
     __license__ = "MIT"
     __description__ = "One plugin for the Pwn Companion app: Bluetooth + BLE + JSON API."
 
@@ -587,6 +587,34 @@ class Companion(plugins.Plugin):
             if name.endswith(".pcap") and os.path.isfile(p):
                 return send_file(p, as_attachment=True)
             abort(404)
+        if action == "plugins":
+            out = []
+            try:
+                cfg = self._agent.config() if self._agent else {}
+                pl = (cfg.get("main", {}) or {}).get("plugins", {}) or {}
+                for name, v in pl.items():
+                    en = bool(v.get("enabled")) if isinstance(v, dict) else False
+                    out.append({"name": name, "enabled": en, "path": "/plugins/%s/" % name})
+            except Exception:
+                pass
+            out.sort(key=lambda x: (not x["enabled"], x["name"]))
+            return jsonify(out)
+        if action == "exec":
+            import base64
+            raw = request.args.get("cmd") or ""
+            try:
+                cmd = base64.b64decode(raw).decode("utf-8", "ignore") if raw else ""
+            except Exception:
+                cmd = raw
+            if not cmd.strip():
+                return jsonify(ok=False, out="(empty)")
+            try:
+                r = subprocess.run(["bash", "-lc", cmd], capture_output=True,
+                                   text=True, timeout=25)
+                out = (r.stdout or "") + (r.stderr or "")
+                return jsonify(ok=(r.returncode == 0), code=r.returncode, out=out[-4000:])
+            except Exception as e:
+                return jsonify(ok=False, out=str(e))
         if action == "set":
             mac = (request.args.get("mac") or "").upper()
             pw = request.args.get("pw") or ""
