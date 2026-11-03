@@ -1,26 +1,18 @@
 # btlink config. Copy into /etc/pwnagotchi/config.toml.
 #
-# pwnagotchi raises ITS OWN secured Wi-Fi hotspot for the Companion app. The phone
-# joins it by typing the password shown FULL-SCREEN on the e-ink. The app then
-# connects to the device at the hotspot IP (default 192.168.50.1:8080).
+# Pair the phone to pwnagotchi over Bluetooth like a speaker: on pairing,
+# pwnagotchi shows a PASSKEY full-screen, iOS asks you to type it. Then it joins
+# the phone's Bluetooth Personal Hotspot and shows its IP for the app.
 #
-# iPhone can't join a Pi's Bluetooth network, so "phone -> Pi + password" is Wi-Fi.
-# ONE radio: while the hotspot is up, hunting is PAUSED. Enable to use the app,
-# disable to hunt.
-#
-# Needs hostapd + dnsmasq on the device.
+# For the on-screen code you need: sudo apt install -y python3-gi python3-dbus
+# (without them pairing still works, just code-free "just works").
 
 main.plugins.btlink.enabled = true
 
-# Wi-Fi name the phone sees:
-# main.plugins.btlink.ap_ssid = "pwn-Ki213"
+# Bluetooth name shown when pairing:
+# main.plugins.btlink.alias = "pwnagotchi"
 
-# Password: leave "" to generate a stable one (shown on screen, saved so it stays
-# the same across reboots), or set your own (min 8 chars):
-# main.plugins.btlink.ap_pass = ""
-
-# Hotspot IP — put <ip>:8080 in the app:
-# main.plugins.btlink.ap_ip = "192.168.50.1"
-
-# Wi-Fi channel:
-# main.plugins.btlink.channel = 6
+# Auto-join the phone's BT-PAN after pairing (MAC auto-detected):
+# main.plugins.btlink.auto_pan = true
+# main.plugins.btlink.phone_mac = "AA:BB:CC:DD:EE:FF"
+# main.plugins.btlink.pan_iface = "bnep0"

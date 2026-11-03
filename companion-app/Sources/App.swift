@@ -8,16 +8,17 @@ struct PwnCompanionApp: App {
         WindowGroup {
             RootView()
                 .environmentObject(conn)
-                .preferredColorScheme(conn.theme == .system ? nil : .dark)
-                .tint(.cyan)
+                .preferredColorScheme(conn.theme.scheme)
+                .tint(.primary)
         }
     }
 }
 
 enum AppTheme: String, CaseIterable, Identifiable {
-    case dark, system
+    case black, white
     var id: String { rawValue }
-    var label: String { self == .dark ? "Тёмная (Liquid Glass)" : "Как в системе" }
+    var label: String { self == .black ? "Чёрная" : "Белая" }
+    var scheme: ColorScheme { self == .black ? .dark : .light }
 }
 
 /// Connection settings to the pwnagotchi (Bluetooth / Wi-Fi — no cable: iOS has
@@ -35,7 +36,7 @@ final class ConnectionStore: ObservableObject {
         port = d.string(forKey: "port") ?? "8080"
         user = d.string(forKey: "user") ?? "changeme"
         pass = d.string(forKey: "pass") ?? "changeme"
-        theme = AppTheme(rawValue: d.string(forKey: "theme") ?? "") ?? .dark
+        theme = AppTheme(rawValue: d.string(forKey: "theme") ?? "") ?? .black
     }
 
     private func save() {

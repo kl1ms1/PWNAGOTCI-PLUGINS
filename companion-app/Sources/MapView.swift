@@ -91,8 +91,8 @@ struct MapView: View {
                             Image(systemName: "wifi")
                                 .font(.system(size: 13, weight: .bold)).foregroundStyle(.white)
                                 .padding(7)
-                                .background(.green.opacity(0.9), in: Circle())
-                                .overlay(Circle().strokeBorder(.white.opacity(0.6), lineWidth: 1))
+                                .background(Color.black, in: Circle())
+                                .overlay(Circle().strokeBorder(.white.opacity(0.8), lineWidth: 1.5))
                             Text(pin.ssid).font(.caption2.weight(.semibold))
                                 .padding(.horizontal, 5).padding(.vertical, 1)
                                 .background(.ultraThinMaterial, in: Capsule())
@@ -103,7 +103,7 @@ struct MapView: View {
 
                 GlassCard {
                     HStack {
-                        Image(systemName: "mappin.and.ellipse").foregroundStyle(.green)
+                        Image(systemName: "mappin.and.ellipse").foregroundStyle(.primary)
                         Text("Уловов на карте: \(store.pins.count)")
                             .font(.subheadline)
                         Spacer()
