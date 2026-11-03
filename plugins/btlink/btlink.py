@@ -117,6 +117,7 @@ class BTLink(plugins.Plugin):
             self._sh(["bluetoothctl", "discoverable", "on"])
             self._sh(["bluetoothctl", "pairable", "on"])
             self._sh(["bluetoothctl", "discoverable-timeout", "0"])
+            self._assert_pairable()          # btmgmt — the real pairable fix
             ok, out = self._sh(["bluetoothctl", "show"])
             logging.info("[btlink] bt up? %s", "Powered: yes" in out)
         except Exception:
@@ -136,15 +137,10 @@ class BTLink(plugins.Plugin):
         while True:
             try:
                 # keep the persistent agent alive and re-assert pairable via it
-                if self._btctl_proc is not None:
-                    if self._btctl_proc.poll() is not None:
-                        self._start_btctl_agent()          # it died -> relaunch
-                    elif not self._iface_ip():
-                        try:
-                            self._btctl_proc.stdin.write("pairable on\ndiscoverable on\n")
-                            self._btctl_proc.stdin.flush()
-                        except Exception:
-                            self._start_btctl_agent()
+                if not self._iface_ip():
+                    self._assert_pairable()                # keep Pairable on (btmgmt)
+                if self._btctl_proc is not None and self._btctl_proc.poll() is not None:
+                    self._start_btctl_agent()              # agent died -> relaunch
                 self._ensure_pan()
             except Exception:
                 logging.debug("[btlink] keepalive tick failed")
@@ -168,6 +164,12 @@ class BTLink(plugins.Plugin):
             # 'just works' pairing) — a one-shot agent would exit and leave the
             # device un-pairable, which is exactly the bug we hit.
             self._start_btctl_agent()
+
+    def _assert_pairable(self):
+        """btmgmt sets the Pairable flag reliably (bluetoothctl didn't on this
+        device). This is what finally let the iPhone pair."""
+        self._sh(["btmgmt", "pairable", "on"])
+        self._sh(["btmgmt", "connectable", "on"])
 
     def _start_btctl_agent(self):
         import subprocess
