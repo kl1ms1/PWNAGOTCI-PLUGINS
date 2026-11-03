@@ -24,7 +24,7 @@ struct PwnCompanionApp: App {
 enum AppTheme: String, CaseIterable, Identifiable {
     case black, white
     var id: String { rawValue }
-    var label: String { self == .black ? "Чёрная" : "Белая" }
+    var label: String { self == .black ? "Dark" : "Light" }
     var scheme: ColorScheme { self == .black ? .dark : .light }
 }
 
@@ -32,7 +32,7 @@ enum FontStyle: String, CaseIterable, Identifiable {
     case system, rounded, serif, mono
     var id: String { rawValue }
     var label: String {
-        ["system": "Системный", "rounded": "Округлый", "serif": "Сериф", "mono": "Моно"][rawValue] ?? rawValue
+        ["system": "System", "rounded": "Rounded", "serif": "Serif", "mono": "Mono"][rawValue] ?? rawValue
     }
     var design: Font.Design {
         switch self {
@@ -47,7 +47,7 @@ enum FontStyle: String, CaseIterable, Identifiable {
 enum Skin: String, CaseIterable, Identifiable {
     case black, white, clear
     var id: String { rawValue }
-    var label: String { self == .black ? "Чёрный" : self == .white ? "Белый" : "Прозрачный" }
+    var label: String { self == .black ? "Black" : self == .white ? "White" : "Clear" }
     var caseColor: Color {
         switch self {
         case .black: return Color(white: 0.14)

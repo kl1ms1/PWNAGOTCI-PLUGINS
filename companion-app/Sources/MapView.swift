@@ -110,7 +110,7 @@ struct MapView: View {
                 GlassCard {
                     HStack {
                         Image(systemName: "mappin.and.ellipse").foregroundStyle(.primary)
-                        Text("Уловов на карте: \(pins.count)")
+                        Text("Catches: \(pins.count)")
                             .font(.subheadline)
                         Spacer()
                         Button {
@@ -123,7 +123,7 @@ struct MapView: View {
                 }
                 .padding()
             }
-            .navigationTitle("Карта уловов")
+            .navigationTitle("Catch map")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
             .sheet(item: $selectedPin) { pin in PinSheet(pin: pin) }
@@ -161,25 +161,25 @@ struct PinSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Сеть") {
+                Section("Network") {
                     Text(pin.ssid).font(.headline)
                     Text(pin.id).font(.caption).foregroundStyle(.secondary)
                     Text(String(format: "%.5f, %.5f", pin.lat, pin.lon))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
-                Section("Пароль (если твоя сеть)") {
-                    TextField("пароль", text: $pw).autocorrectionDisabled().textInputAutocapitalization(.never)
-                    Button { msg = "Пароль сохранён" } label: { Label("Сохранить пароль", systemImage: "key.fill") }
+                Section("Password (if your network)") {
+                    TextField("password", text: $pw).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    Button { msg = "Password saved" } label: { Label("Save password", systemImage: "key.fill") }
                 }
-                Section("Действия") {
-                    Button { msg = "Хэш скачан" } label: { Label("Скачать хэш (.pcap)", systemImage: "arrow.down.doc") }
-                    Button { msg = "В whitelist" } label: { Label("Добавить в whitelist", systemImage: "checkmark.shield") }
-                    Button { msg = "Отправлено на wpa-sec" } label: { Label("Залить на wpa-sec", systemImage: "arrow.up.circle") }
+                Section("Actions") {
+                    Button { msg = "Hash downloaded" } label: { Label("Download hash (.pcap)", systemImage: "arrow.down.doc") }
+                    Button { msg = "To whitelist" } label: { Label("Add to whitelist", systemImage: "checkmark.shield") }
+                    Button { msg = "Sent to wpa-sec" } label: { Label("Upload to wpa-sec", systemImage: "arrow.up.circle") }
                 }
                 if !msg.isEmpty { Section { Text("✅ " + msg).foregroundStyle(.secondary) } }
             }
             .navigationTitle(pin.ssid).navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Готово") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
     }
 }

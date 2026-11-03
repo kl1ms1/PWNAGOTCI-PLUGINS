@@ -62,9 +62,9 @@ struct FunctionRow: View {
 func uptimeStr(_ s: Int?) -> String {
     let s = s ?? 0
     let d = s / 86400, h = (s % 86400) / 3600, m = (s % 3600) / 60
-    if d > 0 { return "\(d)д \(h)ч" }
-    if h > 0 { return "\(h)ч \(m)м" }
-    return "\(m)м"
+    if d > 0 { return "\(d)d \(h)h" }
+    if h > 0 { return "\(h)h \(m)m" }
+    return "\(m)m"
 }
 
 // MARK: - Root
@@ -74,7 +74,7 @@ struct RootView: View {
         TabView {
             DashView().tabItem { Label("Dash", systemImage: "chart.bar") }
             PwndexView().tabItem { Label("Pwndex", systemImage: "list.star") }
-            MapView().tabItem { Label("Карта", systemImage: "map") }
+            MapView().tabItem { Label("Map", systemImage: "map") }
             ControlView().tabItem { Label("Control", systemImage: "slider.horizontal.3") }
             SettingsView().tabItem { Label("Settings", systemImage: "gearshape") }
         }
@@ -87,7 +87,7 @@ struct DashView: View {
     @EnvironmentObject var conn: ConnectionStore
     @State private var image: UIImage?
     @State private var st = DeviceStatus()
-    @State private var status = "Подключаюсь…"
+    @State private var status = "Connecting…"
     @State private var online = false
     @State private var showWeb = false
 
@@ -122,26 +122,26 @@ struct DashView: View {
 
                         LazyVGrid(columns: Array(repeating: GridItem(.flexible()), count: 4), spacing: 10) {
                             StatTile(label: "shakes", value: "\(st.shakes ?? 0)")
-                            StatTile(label: "сети", value: "\(st.networks ?? 0)")
-                            StatTile(label: "пароли", value: "\(st.cracked ?? 0)")
+                            StatTile(label: "nets", value: "\(st.networks ?? 0)")
+                            StatTile(label: "cracked", value: "\(st.cracked ?? 0)")
                             StatTile(label: ".pcap", value: "\(st.pcaps ?? 0)")
-                            StatTile(label: "темп", value: st.temp.map { String(format: "%.0f°", $0) } ?? "—")
+                            StatTile(label: "temp", value: st.temp.map { String(format: "%.0f°", $0) } ?? "—")
                             StatTile(label: "CPU", value: st.cpu.map { String(format: "%.0f%%", $0) } ?? "—")
                             StatTile(label: "RAM", value: st.mem.map { String(format: "%.0f%%", $0) } ?? "—")
-                            StatTile(label: "SD ГБ", value: st.sd_free.map { String(format: "%.0f", $0) } ?? "—")
+                            StatTile(label: "SD GB", value: st.sd_free.map { String(format: "%.0f", $0) } ?? "—")
                         }
 
                         HStack(spacing: 10) {
                             Button { Task { await refresh() } } label: {
-                                Label("Обновить", systemImage: "arrow.clockwise")
+                                Label("Refresh", systemImage: "arrow.clockwise")
                             }.buttonStyle(FilledStyle())
                             Button { showWeb = true } label: {
-                                Label("Веб-морда", systemImage: "globe").frame(maxWidth: .infinity)
+                                Label("Web UI", systemImage: "globe").frame(maxWidth: .infinity)
                             }.buttonStyle(.bordered).disabled(conn.baseURL == nil || conn.demo)
                         }
 
                         NavigationLink { EventsView() } label: {
-                            Label("События", systemImage: "list.bullet.rectangle")
+                            Label("Events", systemImage: "list.bullet.rectangle")
                                 .frame(maxWidth: .infinity)
                         }.buttonStyle(.bordered)
                     }
@@ -166,9 +166,9 @@ struct DashView: View {
     private func refresh() async {
         do {
             image = try await PwnClient.fetchUIImage(conn)
-            online = true; status = "На связи"
+            online = true; status = "Online"
         } catch {
-            online = false; status = "Нет связи"
+            online = false; status = "No link"
         }
         if let s = try? await PwnClient.fetchStatus(conn) { st = s }
     }
@@ -181,13 +181,23 @@ struct PwndexView: View {
     @State private var items: [NetItem] = []
     @State private var loaded = false
     @State private var editing: NetItem?
+    @State private var query = ""
+
+    private var filtered: [NetItem] {
+        guard !query.isEmpty else { return items }
+        let q = query.lowercased()
+        return items.filter {
+            $0.ssid.lowercased().contains(q) || $0.mac.lowercased().contains(q)
+                || $0.pw.lowercased().contains(q)
+        }
+    }
 
     var body: some View {
         NavigationStack {
             ZStack {
                 ThemeBG()
                 List {
-                    ForEach(items) { it in
+                    ForEach(filtered) { it in
                         Button { editing = it } label: {
                             HStack {
                                 VStack(alignment: .leading, spacing: 3) {
@@ -196,7 +206,7 @@ struct PwndexView: View {
                                 }
                                 Spacer()
                                 if it.pw.isEmpty {
-                                    Text("нет пароля").font(.caption).foregroundStyle(.secondary)
+                                    Text("no password").font(.caption).foregroundStyle(.secondary)
                                 } else {
                                     Text(it.pw).font(.callout.monospaced()).foregroundStyle(.primary)
                                 }
@@ -205,12 +215,13 @@ struct PwndexView: View {
                         }
                         .listRowBackground(Color.primary.opacity(0.05))
                     }
-                    if items.isEmpty {
-                        Text(loaded ? "Каталог пуст" : "Загрузка…")
+                    if filtered.isEmpty {
+                        Text(loaded ? "Nothing found" : "Loading…")
                             .foregroundStyle(.secondary).listRowBackground(Color.clear)
                     }
                 }
                 .scrollContentBackground(.hidden)
+                .searchable(text: $query, prompt: "Search networks")
                 .refreshable { await load() }
             }
             .navigationTitle("Pwndex")
@@ -247,27 +258,27 @@ struct EditPwSheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Сеть") {
+                Section("Network") {
                     Text(item.ssid).font(.headline)
                     Text(item.mac).font(.caption).foregroundStyle(.secondary)
                 }
-                Section("Пароль (если это твоя сеть)") {
-                    TextField("пароль", text: $pw).autocorrectionDisabled().textInputAutocapitalization(.never)
-                    Button { onSave(pw); msg = "Пароль сохранён" } label: {
-                        Label("Сохранить пароль", systemImage: "key.fill")
+                Section("Password (if your network)") {
+                    TextField("password", text: $pw).autocorrectionDisabled().textInputAutocapitalization(.never)
+                    Button { onSave(pw); msg = "Password saved" } label: {
+                        Label("Save password", systemImage: "key.fill")
                     }
                 }
-                Section("Действия") {
-                    actionRow("Скачать хэш (.pcap)", "arrow.down.doc", "Хэш скачан")
-                    actionRow("Добавить в whitelist", "checkmark.shield", "В whitelist")
-                    actionRow("Залить на wpa-sec", "arrow.up.circle", "Отправлено на wpa-sec")
+                Section("Actions") {
+                    actionRow("Download hash (.pcap)", "arrow.down.doc", "Hash downloaded")
+                    actionRow("Add to whitelist", "checkmark.shield", "To whitelist")
+                    actionRow("Upload to wpa-sec", "arrow.up.circle", "Sent to wpa-sec")
                 }
                 if !msg.isEmpty {
-                    Section { Text("✅ " + msg + (conn.demo ? " (демо)" : "")).foregroundStyle(.secondary) }
+                    Section { Text("✅ " + msg + (conn.demo ? " (demo)" : "")).foregroundStyle(.secondary) }
                 }
             }
             .navigationTitle(item.ssid).navigationBarTitleDisplayMode(.inline)
-            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Готово") { dismiss() } } }
+            .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
         }
     }
 
@@ -294,37 +305,37 @@ struct ControlView: View {
                         if !toast.isEmpty {
                             GlassCard { Text(toast).font(.footnote).foregroundStyle(.secondary) }
                         }
-                        section("Режим") {
+                        section("Mode") {
                             FunctionRow(icon: "bolt.horizontal.circle", title: "Auto Mode",
-                                        subtitle: "Обычная охота") { run("auto") }
+                                        subtitle: "Normal hunting") { run("auto") }
                             div
                             FunctionRow(icon: "hand.raised", title: "Manual Mode",
-                                        subtitle: "Пауза, ручной режим") { run("manual") }
+                                        subtitle: "Pause, manual mode") { run("manual") }
                         }
-                        section("Устройство") {
+                        section("Device") {
                             FunctionRow(icon: "arrow.clockwise.circle", title: "Restart pwnagotchi",
-                                        subtitle: "Перезапустить сервис") { run("restart") }
+                                        subtitle: "Restart service") { run("restart") }
                             div
                             FunctionRow(icon: "arrow.counterclockwise.circle", title: "Reboot",
-                                        subtitle: "Перезагрузить систему") { confirm = ("Перезагрузить?", "reboot") }
+                                        subtitle: "Reboot system") { confirm = ("Reboot?", "reboot") }
                             div
                             FunctionRow(icon: "power.circle", title: "Shutdown",
-                                        subtitle: "Выключить устройство") { confirm = ("Выключить?", "shutdown") }
+                                        subtitle: "Power off device") { confirm = ("Power off?", "shutdown") }
                         }
-                        section("Данные") {
-                            FunctionRow(icon: "key.horizontal.fill", title: "Выгрузить все пароли",
-                                        subtitle: "Список сетей+паролей → поделиться") { exportPasswords() }
+                        section("Data") {
+                            FunctionRow(icon: "key.horizontal.fill", title: "Export all passwords",
+                                        subtitle: "Networks + passwords → share") { exportPasswords() }
                             div
-                            FunctionRow(icon: "arrow.up.circle", title: "Залить все хэши на wpa-sec",
-                                        subtitle: "Отправить все .pcap") { run("upload_all") }
+                            FunctionRow(icon: "arrow.up.circle", title: "Upload all hashes to wpa-sec",
+                                        subtitle: "Send all .pcap") { run("upload_all") }
                             div
-                            FunctionRow(icon: "arrow.down.circle", title: "Скачать все хэши",
-                                        subtitle: "Забрать .pcap на телефон") { run("download_all") }
+                            FunctionRow(icon: "arrow.down.circle", title: "Download all hashes",
+                                        subtitle: "Pull .pcap to phone") { run("download_all") }
                         }
-                        section("Интерфейс") {
+                        section("Interface") {
                             FunctionRow(icon: "globe", title: "Pwnagotchi Web UI",
-                                        subtitle: "Открыть веб-морду (на Dash)") {
-                                toast = "Веб-морда — на вкладке Dash, кнопка «Веб-морда»." }
+                                        subtitle: "Open Web UI (on Dash)") {
+                                toast = "Web UI is on the Dash tab, 'Web UI' button." }
                         }
                     }
                     .padding()
@@ -337,9 +348,9 @@ struct ControlView: View {
                         Text(exportText).font(.callout.monospaced()).textSelection(.enabled)
                             .frame(maxWidth: .infinity, alignment: .leading).padding()
                     }
-                    .navigationTitle("Все пароли").navigationBarTitleDisplayMode(.inline)
+                    .navigationTitle("All passwords").navigationBarTitleDisplayMode(.inline)
                     .toolbar {
-                        ToolbarItem(placement: .topBarLeading) { Button("Готово") { showExport = false } }
+                        ToolbarItem(placement: .topBarLeading) { Button("Done") { showExport = false } }
                         ToolbarItem(placement: .topBarTrailing) {
                             ShareLink(item: exportText) { Image(systemName: "square.and.arrow.up") }
                         }
@@ -348,8 +359,8 @@ struct ControlView: View {
             }
             .alert(confirm?.title ?? "", isPresented: Binding(
                 get: { confirm != nil }, set: { if !$0 { confirm = nil } })) {
-                Button("Отмена", role: .cancel) { confirm = nil }
-                Button("Да", role: .destructive) { if let c = confirm { run(c.cmd) }; confirm = nil }
+                Button("Cancel", role: .cancel) { confirm = nil }
+                Button("Yes", role: .destructive) { if let c = confirm { run(c.cmd) }; confirm = nil }
             }
         }
     }
@@ -366,10 +377,10 @@ struct ControlView: View {
     }
 
     private func run(_ cmd: String) {
-        toast = "Отправляю: \(cmd)…"
+        toast = "Sending: \(cmd)…"
         Task {
             let ok = (try? await PwnClient.control(conn, cmd: cmd)) ?? false
-            toast = ok ? "✅ \(cmd) выполнено" : "❌ \(cmd): нужен эндпоинт на девайсе (скоро)"
+            toast = ok ? "✅ \(cmd) done" : "❌ \(cmd): needs a device endpoint (soon)"
         }
     }
 
@@ -378,7 +389,7 @@ struct ControlView: View {
             let nets = (try? await PwnClient.fetchPwndex(conn)) ?? []
             let lines = nets.filter { !$0.pw.isEmpty }
                 .map { "\($0.ssid)  —  \($0.pw)   (\($0.mac))" }
-            exportText = lines.isEmpty ? "Нет сохранённых паролей" : lines.joined(separator: "\n")
+            exportText = lines.isEmpty ? "No saved passwords" : lines.joined(separator: "\n")
             showExport = true
         }
     }
@@ -391,39 +402,39 @@ struct SettingsView: View {
     var body: some View {
         NavigationStack {
             Form {
-                Section("Устройство") {
+                Section("Device") {
                     HStack {
-                        Text("Режим"); Spacer()
-                        Text(conn.demo ? "ДЕМО (Beta)" : "Подключение")
+                        Text("Mode"); Spacer()
+                        Text(conn.demo ? "DEMO (Beta)" : "Connection")
                             .foregroundStyle(.secondary)
                     }
                     Button(role: .destructive) {
                         conn.entered = false
                         conn.demo = false
                     } label: {
-                        Label("Сменить устройство / выход", systemImage: "arrow.left.circle")
+                        Label("Switch device / exit", systemImage: "arrow.left.circle")
                     }
                 }
-                Section("Вид") {
-                    Picker("Тема", selection: $conn.theme) {
+                Section("Appearance") {
+                    Picker("Theme", selection: $conn.theme) {
                         ForEach(AppTheme.allCases) { t in Text(t.label).tag(t) }
                     }.pickerStyle(.segmented)
-                    Picker("Шрифт", selection: $conn.font) {
+                    Picker("Font", selection: $conn.font) {
                         ForEach(FontStyle.allCases) { f in Text(f.label).tag(f) }
                     }
-                    ColorPicker("Цвет экрана девайса", selection: $conn.faceColor, supportsOpacity: false)
+                    ColorPicker("Device screen color", selection: $conn.faceColor, supportsOpacity: false)
                 }
-                Section("Подключение") {
-                    LabeledField("IP устройства", text: $conn.host)
-                    LabeledField("Порт", text: $conn.port)
-                    LabeledField("Логин", text: $conn.user)
+                Section("Connection") {
+                    LabeledField("Device IP", text: $conn.host)
+                    LabeledField("Port", text: $conn.port)
+                    LabeledField("Login", text: $conn.user)
                     HStack {
-                        Text("Пароль"); Spacer()
+                        Text("Password"); Spacer()
                         SecureField("", text: $conn.pass).multilineTextAlignment(.trailing)
                     }
                 }
-                Section("Как подключиться") {
-                    Text("Включи на Pi плагин btlink — при сопряжении по Bluetooth pwnagotchi покажет код на весь экран, введи его на айфоне. Потом включи Личную точку, Pi войдёт в неё и покажет свой IP — впиши его сюда (порт 8080). Логин/пароль — из config.toml (ui.web.username / ui.web.password).")
+                Section("How to connect") {
+                    Text("Enable the companion plugin on the Pi. On Bluetooth pairing pwnagotchi shows a code full-screen — type it on the iPhone. Then turn on Personal Hotspot: the Pi joins it and shows its IP — put it here (port 8080). Login/password are from config.toml (ui.web.username / ui.web.password).")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
             }

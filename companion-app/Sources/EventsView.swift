@@ -28,13 +28,13 @@ struct EventsView: View {
                     .listRowBackground(Color.primary.opacity(0.05))
                 }
                 if events.isEmpty {
-                    Text(conn.demo ? "" : "Лог появится, когда заведём BLE-поток событий")
+                    Text(conn.demo ? "" : "The log appears once the BLE event stream is wired")
                         .foregroundStyle(.secondary).listRowBackground(Color.clear)
                 }
             }
             .scrollContentBackground(.hidden)
         }
-        .navigationTitle("События")
+        .navigationTitle("Events")
         .navigationBarTitleDisplayMode(.inline)
         .task { if conn.demo { events = DemoData.events() } }
     }

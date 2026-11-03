@@ -59,7 +59,7 @@ struct WebUISheet: View {
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
                     ToolbarItem(placement: .topBarTrailing) {
-                        Button("Готово") { dismiss() }
+                        Button("Done") { dismiss() }
                     }
                 }
         }
