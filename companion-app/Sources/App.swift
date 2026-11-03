@@ -354,6 +354,42 @@ enum PwnClient {
         } catch { return (false, "no connection") }
     }
 
+    /// Generic config.toml read (returns the raw JSON value as Any?).
+    static func cfgGet(_ conn: ConnectionStore, _ key: String) async -> Any? {
+        if conn.demo { return DemoData.cfg(key) }
+        let e = key.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? key
+        guard let url = conn.companionURL("cfg_get", "&key=\(e)") else { return nil }
+        if let (data, _) = try? await URLSession.shared.data(for: request(url, conn, timeout: 10)),
+           let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return j["value"]
+        }
+        return nil
+    }
+
+    static func cfgGetString(_ conn: ConnectionStore, _ key: String) async -> String {
+        (await cfgGet(conn, key) as? String) ?? ""
+    }
+
+    static func cfgGetDict(_ conn: ConnectionStore, _ key: String) async -> [String: String] {
+        guard let d = await cfgGet(conn, key) as? [String: Any] else { return [:] }
+        var out: [String: String] = [:]
+        for (k, v) in d { out[k] = v as? String ?? String(describing: v) }
+        return out
+    }
+
+    @discardableResult
+    static func cfgSet(_ conn: ConnectionStore, _ key: String, _ val: String, quote: Bool = true) async -> (Bool, String) {
+        if conn.demo { return (true, "demo") }
+        let allowed = CharacterSet.urlQueryAllowed.subtracting(CharacterSet(charactersIn: "&=+?#%"))
+        let e = { (s: String) in s.addingPercentEncoding(withAllowedCharacters: allowed) ?? s }
+        guard let url = conn.companionURL("cfg_set", "&key=\(e(key))&val=\(e(val))&quote=\(quote ? 1 : 0)") else { return (false, "bad url") }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request(url, conn, timeout: 12))
+            let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return (((j?["ok"]) as? Bool) ?? false, (j?["msg"] as? String) ?? "")
+        } catch { return (false, "no connection") }
+    }
+
     static func whitelist(_ conn: ConnectionStore) async -> [String] {
         if conn.demo { return ["HomeWiFi", "MyPhone-Hotspot"] }
         guard let url = conn.companionURL("whitelist") else { return [] }

@@ -471,6 +471,10 @@ struct ControlView: View {
 struct SettingsView: View {
     @EnvironmentObject var conn: ConnectionStore
     @State private var editConfig = false
+    @State private var devName = ""
+    @State private var apiKey = ""
+    @State private var idLoaded = false
+    @State private var idMsg = ""
     var body: some View {
         NavigationStack {
             Form {
@@ -489,6 +493,25 @@ struct SettingsView: View {
                     } label: {
                         Label("Switch device / exit", systemImage: "arrow.left.circle")
                     }
+                }
+                Section("Device identity") {
+                    HStack {
+                        Text("Name"); Spacer()
+                        TextField("pwnagotchi", text: $devName).multilineTextAlignment(.trailing)
+                            .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    }
+                    Button { saveCfg("main.name", devName) } label: { Label("Save name", systemImage: "pencil") }
+                    HStack {
+                        Text("wpa-sec key"); Spacer()
+                        SecureField("api_key", text: $apiKey).multilineTextAlignment(.trailing)
+                    }
+                    Button { saveCfg("main.plugins.wpa-sec.api_key", apiKey) } label: {
+                        Label("Save wpa-sec key", systemImage: "key")
+                    }
+                    if !idMsg.isEmpty { Text(idMsg).font(.caption).foregroundStyle(.secondary) }
+                }
+                Section("Customize") {
+                    NavigationLink { FacesView() } label: { Label("Device faces", systemImage: "face.smiling") }
                 }
                 Section("Appearance") {
                     Picker("Theme", selection: $conn.theme) {
@@ -523,6 +546,21 @@ struct SettingsView: View {
             .sheet(isPresented: $editConfig) {
                 FileSheet(path: "/etc/pwnagotchi/config.toml") {}
             }
+            .task {
+                if !idLoaded {
+                    devName = await PwnClient.cfgGetString(conn, "main.name")
+                    apiKey = await PwnClient.cfgGetString(conn, "main.plugins.wpa-sec.api_key")
+                    idLoaded = true
+                }
+            }
+        }
+    }
+
+    private func saveCfg(_ key: String, _ val: String) {
+        idMsg = "Saving…"
+        Task {
+            let (ok, m) = await PwnClient.cfgSet(conn, key, val, quote: true)
+            idMsg = (ok ? "✅ " : "❌ ") + (m.isEmpty ? "saved" : m)
         }
     }
 }

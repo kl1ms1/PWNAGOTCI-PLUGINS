@@ -1,6 +1,7 @@
 import SwiftUI
 import MapKit
 import CoreLocation
+import UniformTypeIdentifiers
 
 // MARK: - Location
 
@@ -68,6 +69,16 @@ final class MapStore: ObservableObject {
     }
 
     func clear() { pins = []; save() }
+
+    /// Merge imported pins (dedupe by MAC) so maps can be shared between phones.
+    func merge(_ incoming: [CatchPin]) {
+        var known = Set(pins.map { $0.id })
+        var changed = false
+        for p in incoming where !known.contains(p.id) {
+            pins.append(p); known.insert(p.id); changed = true
+        }
+        if changed { save() }
+    }
 }
 
 // MARK: - Map tab
@@ -82,6 +93,9 @@ struct MapView: View {
     @State private var centered = false
 
     @State private var selectedPin: CatchPin?
+    @State private var shareURL: URL?
+    @State private var importing = false
+    @State private var importMsg = ""
     private var pins: [CatchPin] { conn.demo ? DemoData.pins() : store.pins }
 
     var body: some View {
@@ -112,6 +126,9 @@ struct MapView: View {
                         Image(systemName: "mappin.and.ellipse").foregroundStyle(.primary)
                         Text("Catches: \(pins.count)")
                             .font(.subheadline)
+                        if !importMsg.isEmpty {
+                            Text("· \(importMsg)").font(.caption2).foregroundStyle(.secondary)
+                        }
                         Spacer()
                         Button {
                             if let c = loc.coord {
@@ -122,11 +139,26 @@ struct MapView: View {
                     }
                 }
                 .padding()
+                .sheet(item: $shareURL) { url in ActivityView(items: [url]) }
             }
             .navigationTitle("Catch map")
             .navigationBarTitleDisplayMode(.inline)
             .toolbarColorScheme(.dark, for: .navigationBar)
+            .toolbar {
+                ToolbarItem(placement: .topBarTrailing) {
+                    Menu {
+                        Button { export() } label: { Label("Export map (.json)", systemImage: "square.and.arrow.up") }
+                        Button { importing = true } label: { Label("Import map (.json)", systemImage: "square.and.arrow.down") }
+                        if !conn.demo {
+                            Button(role: .destructive) { store.clear() } label: { Label("Clear pins", systemImage: "trash") }
+                        }
+                    } label: { Image(systemName: "ellipsis.circle") }
+                }
+            }
             .sheet(item: $selectedPin) { pin in PinSheet(pin: pin) }
+            .fileImporter(isPresented: $importing, allowedContentTypes: [.json]) { result in
+                handleImport(result)
+            }
         }
         .task {
             if conn.demo {
@@ -150,14 +182,38 @@ struct MapView: View {
             }
         }
     }
+
+    private func export() {
+        guard let data = try? JSONEncoder().encode(pins) else { return }
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("pwn-map-\(Int(Date().timeIntervalSince1970)).json")
+        try? data.write(to: url)
+        shareURL = url
+    }
+
+    private func handleImport(_ result: Result<URL, Error>) {
+        guard case .success(let url) = result else { importMsg = "import failed"; return }
+        let scoped = url.startAccessingSecurityScopedResource()
+        defer { if scoped { url.stopAccessingSecurityScopedResource() } }
+        guard let data = try? Data(contentsOf: url),
+              let arr = try? JSONDecoder().decode([CatchPin].self, from: data) else {
+            importMsg = "bad file"; return
+        }
+        let before = store.pins.count
+        store.merge(arr)
+        importMsg = "+\(store.pins.count - before) imported"
+    }
 }
 
-/// Tap a map bubble -> this menu (ssid + actions, like pwndex).
+/// Tap a map bubble -> this menu (ssid + real actions, like pwndex).
 struct PinSheet: View {
+    @EnvironmentObject var conn: ConnectionStore
     let pin: CatchPin
     @State private var msg = ""
-    @State private var pw = ""
+    @State private var busy = false
+    @State private var shareURL: URL?
     @Environment(\.dismiss) private var dismiss
+
     var body: some View {
         NavigationStack {
             Form {
@@ -167,19 +223,51 @@ struct PinSheet: View {
                     Text(String(format: "%.5f, %.5f", pin.lat, pin.lon))
                         .font(.caption2).foregroundStyle(.secondary)
                 }
-                Section("Password (if your network)") {
-                    TextField("password", text: $pw).autocorrectionDisabled().textInputAutocapitalization(.never)
-                    Button { msg = "Password saved" } label: { Label("Save password", systemImage: "key.fill") }
-                }
                 Section("Actions") {
-                    Button { msg = "Hash downloaded" } label: { Label("Download hash (.pcap)", systemImage: "arrow.down.doc") }
-                    Button { msg = "To whitelist" } label: { Label("Add to whitelist", systemImage: "checkmark.shield") }
-                    Button { msg = "Sent to wpa-sec" } label: { Label("Upload to wpa-sec", systemImage: "arrow.up.circle") }
+                    Button { downloadHash() } label: { Label("Download hash (.pcap)", systemImage: "arrow.down.doc") }
+                    Button { whitelist() } label: { Label("Add to whitelist", systemImage: "checkmark.shield") }
+                    Button { upload() } label: { Label("Upload to wpa-sec", systemImage: "arrow.up.circle") }
                 }
-                if !msg.isEmpty { Section { Text("✅ " + msg).foregroundStyle(.secondary) } }
+                if busy { Section { HStack { ProgressView(); Text("Working…").foregroundStyle(.secondary) } } }
+                if !msg.isEmpty { Section { Text(msg + (conn.demo ? " (demo)" : "")).foregroundStyle(.secondary) } }
             }
             .navigationTitle(pin.ssid).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
+            .sheet(item: $shareURL) { url in ActivityView(items: [url]) }
+        }
+    }
+
+    private func downloadHash() {
+        busy = true; msg = ""
+        Task {
+            defer { busy = false }
+            if conn.demo {
+                let url = FileManager.default.temporaryDirectory.appendingPathComponent("\(pin.ssid).pcap")
+                try? Data("demo handshake".utf8).write(to: url); shareURL = url; return
+            }
+            guard let (name, data) = await PwnClient.pcapForMac(conn, pin.id) else {
+                msg = "❌ No .pcap for this network yet"; return
+            }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent(name)
+            try? data.write(to: url); shareURL = url
+        }
+    }
+
+    private func whitelist() {
+        busy = true; msg = ""
+        Task {
+            defer { busy = false }
+            let (ok, m, _) = await PwnClient.whitelistSet(conn, ssid: pin.ssid, add: true)
+            msg = (ok ? "✅ " : "❌ ") + (m.isEmpty ? "done" : m)
+        }
+    }
+
+    private func upload() {
+        busy = true; msg = ""
+        Task {
+            defer { busy = false }
+            let (ok, m) = await PwnClient.uploadAll(conn)
+            msg = (ok ? "✅ " : "❌ ") + (m.isEmpty ? "triggered" : m)
         }
     }
 }

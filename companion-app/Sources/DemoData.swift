@@ -40,6 +40,20 @@ enum DemoData {
         ]
     }
 
+    /// Demo config.toml values for cfg_get.
+    static func cfg(_ key: String) -> Any? {
+        switch key {
+        case "main.name": return "Ki213"
+        case "main.plugins.wpa-sec.api_key": return ""
+        case "ui.faces":
+            return ["LOOK_R": "( ⚆_⚆)", "LOOK_L": "(☉_☉ )", "SLEEP": "(⇀‿‿↼)",
+                    "AWAKE": "(◕‿‿◕)", "HAPPY": "(•‿‿•)", "COOL": "(⌐■_■)",
+                    "INTENSE": "(°▃▃°)", "BORED": "(-__-)", "SAD": "(╥☁╥ )",
+                    "EXCITED": "(ᵔ◡◡ᵔ)"]
+        default: return nil
+        }
+    }
+
     /// Believable shell output for the demo terminal (so beta feels real).
     static func shell(_ raw: String) -> String {
         let cmd = raw.trimmingCharacters(in: .whitespaces)

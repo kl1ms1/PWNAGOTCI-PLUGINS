@@ -54,7 +54,7 @@ class _LinkWidget(_Widget):
 
 class Companion(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "1.4.0"
+    __version__ = "1.5.0"
     __license__ = "MIT"
     __description__ = "One plugin for the Pwn Companion app: Bluetooth + BLE + JSON API."
 
@@ -666,6 +666,62 @@ class Companion(plugins.Plugin):
             return False, str(e)
         return True, "%s=%s saved (restart to apply)" % (key, val)
 
+    def _cfg_get(self, key):
+        try:
+            cfg = self._agent.config() if self._agent else {}
+            cur = cfg
+            for seg in (key or "").split("."):
+                if isinstance(cur, dict) and seg in cur:
+                    cur = cur[seg]
+                else:
+                    return None
+            return cur
+        except Exception:
+            return None
+
+    def _cfg_set(self, key, val, quote):
+        import re
+        key = (key or "").strip()
+        if not re.match(r'^[A-Za-z0-9_.\-]+$', key):
+            return False, "bad key"
+        p = self._config_path()
+        try:
+            with open(p, "r") as f:
+                lines = f.readlines()
+        except Exception as e:
+            return False, str(e)
+        if quote:
+            v = '"%s"' % str(val).replace("\\", "\\\\").replace('"', '\\"')
+        else:
+            v = str(val)
+        newline = "%s = %s\n" % (key, v)
+        rx = re.compile(r'^\s*#?\s*%s\s*=' % re.escape(key))
+        idx = None
+        for i, ln in enumerate(lines):
+            if rx.match(ln):
+                idx = i
+                break
+        if idx is not None:
+            lines[idx] = newline
+        else:
+            prefix = key.split(".")[0] + "."
+            after = None
+            for i, ln in enumerate(lines):
+                if re.match(r'^\s*' + re.escape(prefix), ln):
+                    after = i
+            lines.insert((after + 1) if after is not None else len(lines), newline)
+        try:
+            try:
+                import shutil
+                shutil.copy2(p, p + ".companion.bak")
+            except Exception:
+                pass
+            with open(p, "w") as f:
+                f.writelines(lines)
+        except Exception as e:
+            return False, str(e)
+        return True, "%s set (restart to apply)" % key
+
     def _whitelist_get(self):
         try:
             cfg = self._agent.config() if self._agent else {}
@@ -800,6 +856,14 @@ class Companion(plugins.Plugin):
             name = request.args.get("name") or ""
             on = (request.args.get("on") or "1") in ("1", "true", "True")
             ok, msg = self._plugin_set(name, on)
+            return jsonify(ok=ok, msg=msg)
+        if action == "cfg_get":
+            return jsonify(ok=True, key=request.args.get("key") or "",
+                           value=self._cfg_get(request.args.get("key") or ""))
+        if action == "cfg_set":
+            quote = (request.args.get("quote") or "1") in ("1", "true", "True")
+            ok, msg = self._cfg_set(request.args.get("key") or "",
+                                    request.args.get("val") or "", quote)
             return jsonify(ok=ok, msg=msg)
         if action == "whitelist":
             return jsonify(list=self._whitelist_get())
