@@ -33,10 +33,13 @@ import time
 import pwnagotchi.plugins as plugins
 
 try:
-    from pwnagotchi.ui.components import Widget as _Widget
+    from pwnagotchi.ui.components import Widget as _Widget, LabeledValue
+    from pwnagotchi.ui.view import BLACK
     import pwnagotchi.ui.fonts as fonts
 except Exception:
     _Widget = object
+    LabeledValue = None
+    BLACK = 0x00
     fonts = None
 
 
@@ -70,9 +73,11 @@ class BTLink(plugins.Plugin):
         self._pan_ip = ""
         self._passkey = ""            # shown full-screen while pairing
         self._passkey_at = 0.0
-        self._last_pan = 0.0
         self._added = False
+        self._label_added = False
+        self._label_pos = (0, 83)     # "BT: nick" line, above the cracked-pw line
         self._agent_started = False
+        self._keep_started = False
         self._f_small = None
         self._f_big = None
 
@@ -83,6 +88,12 @@ class BTLink(plugins.Plugin):
         self._auto_pan = bool(o.get("auto_pan", True))
         self._phone_mac = str(o.get("phone_mac", "") or "").upper().strip()
         self._pan_iface = o.get("pan_iface", self._pan_iface)
+        pos = o.get("label_position", "0,83")
+        try:
+            x, y = str(pos).split(",")
+            self._label_pos = (int(x), int(y))
+        except Exception:
+            pass
         logging.info("[btlink] loaded")
 
     def _sh(self, args, timeout=12):
@@ -110,6 +121,26 @@ class BTLink(plugins.Plugin):
         except Exception:
             logging.exception("[btlink] bt setup")
         self._start_agent()
+        self._start_keepalive()
+
+    def _start_keepalive(self):
+        if self._keep_started:
+            return
+        self._keep_started = True
+        threading.Thread(target=self._keepalive_loop, daemon=True).start()
+
+    def _keepalive_loop(self):
+        """Runs in a thread (not on_epoch), so it works the SAME in auto AND
+        manual mode: keep Bluetooth discoverable and (re)join the phone's PAN."""
+        while True:
+            try:
+                if not self._iface_ip():
+                    self._sh(["bluetoothctl", "discoverable", "on"])
+                    self._sh(["bluetoothctl", "pairable", "on"])
+                self._ensure_pan()
+            except Exception:
+                logging.debug("[btlink] keepalive tick failed")
+            time.sleep(20)
 
     # --- BlueZ pairing agent: DisplayOnly -> show passkey on the e-ink -----
     def _start_agent(self):
@@ -222,27 +253,34 @@ class BTLink(plugins.Plugin):
             self._pan_ip = ip
             logging.info("[btlink] PAN up: %s", ip)
 
-    def on_epoch(self, agent, epoch, epoch_data):
-        now = time.time()
-        if now - self._last_pan < 20:
-            return
-        self._last_pan = now
-        try:
-            self._ensure_pan()
-        except Exception:
-            logging.exception("[btlink] ensure_pan")
-
-    # --- full-screen e-ink -------------------------------------------------
+    # --- e-ink -------------------------------------------------------------
     def on_ui_setup(self, ui):
-        if _Widget is object:
-            return
-        try:
-            ui.add_element("btlink", _LinkWidget(self))
-            self._added = True
-        except Exception:
-            logging.debug("[btlink] could not add widget")
+        # small persistent "BT: nick" line (above the cracked-password line)
+        if LabeledValue is not None:
+            try:
+                ui.add_element("btlabel", LabeledValue(
+                    color=BLACK, label="BT:", value=self._alias,
+                    position=self._label_pos,
+                    label_font=getattr(fonts, "Bold", None),
+                    text_font=getattr(fonts, "Small", None)))
+                self._label_added = True
+            except Exception:
+                logging.debug("[btlink] could not add label")
+        # full-screen passkey takeover (only while pairing)
+        if _Widget is not object:
+            try:
+                ui.add_element("btlink", _LinkWidget(self))
+                self._added = True
+            except Exception:
+                logging.debug("[btlink] could not add widget")
 
     def on_ui_update(self, ui):
+        # keep the small "BT:" line current (nick, or the IP once linked)
+        if self._label_added:
+            try:
+                ui.set("btlabel", self._pan_ip if self._pan_ip else self._alias)
+            except Exception:
+                pass
         if not self._added:
             return
         # only take over the whole screen while a passkey is being shown
@@ -305,5 +343,9 @@ class BTLink(plugins.Plugin):
             pass
         try:
             ui.remove_element("btlink")
+        except Exception:
+            pass
+        try:
+            ui.remove_element("btlabel")
         except Exception:
             pass
