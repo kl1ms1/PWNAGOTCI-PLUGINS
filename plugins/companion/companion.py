@@ -54,7 +54,7 @@ class _LinkWidget(_Widget):
 
 class Companion(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "1.2.0"
+    __version__ = "1.2.1"
     __license__ = "MIT"
     __description__ = "One plugin for the Pwn Companion app: Bluetooth + BLE + JSON API."
 
@@ -464,11 +464,20 @@ class Companion(plugins.Plugin):
         except Exception:
             return None
 
+    def _hs_dirs(self):
+        """All handshake dirs that actually exist (config path + common ones),
+        deduped, config value first. jayofelony images vary: /root/handshakes
+        or /home/pi/handshakes."""
+        cands = [self._hs_dir, "/home/pi/handshakes", "/root/handshakes",
+                 "/root/.pwnagotchi/handshakes", "/opt/pwnagotchi/handshakes"]
+        out = []
+        for d in cands:
+            if d and d not in out and os.path.isdir(d):
+                out.append(d)
+        return out
+
     def _pcaps(self):
-        try:
-            return sum(1 for f in os.listdir(self._hs_dir) if f.endswith(".pcap"))
-        except Exception:
-            return 0
+        return len(self._pcap_list())
 
     def _dex(self):
         try:
@@ -563,10 +572,25 @@ class Companion(plugins.Plugin):
             return False, str(e)
 
     def _pcap_list(self):
-        try:
-            return sorted(f for f in os.listdir(self._hs_dir) if f.endswith(".pcap"))
-        except Exception:
-            return []
+        names = set()
+        for d in self._hs_dirs():
+            try:
+                for f in os.listdir(d):
+                    if f.endswith(".pcap"):
+                        names.add(f)
+            except Exception:
+                pass
+        return sorted(names)
+
+    def _pcap_path(self, name):
+        name = os.path.basename(name or "")
+        if not name.endswith(".pcap"):
+            return None
+        for d in self._hs_dirs():
+            p = os.path.join(d, name)
+            if os.path.isfile(p):
+                return p
+        return None
 
     def on_webhook(self, path, request):
         from flask import jsonify, abort
@@ -580,11 +604,19 @@ class Companion(plugins.Plugin):
             return jsonify(ok=ok, msg=msg)
         if action == "pcaps":
             return jsonify(self._pcap_list())
+        if action == "hsdirs":
+            diag = []
+            for d in self._hs_dirs():
+                try:
+                    n = sum(1 for f in os.listdir(d) if f.endswith(".pcap"))
+                except Exception:
+                    n = -1
+                diag.append({"dir": d, "pcaps": n})
+            return jsonify(configured=self._hs_dir, dirs=diag)
         if action == "pcap":
             from flask import send_file
-            name = os.path.basename(request.args.get("name") or "")
-            p = os.path.join(self._hs_dir, name)
-            if name.endswith(".pcap") and os.path.isfile(p):
+            p = self._pcap_path(request.args.get("name") or "")
+            if p:
                 return send_file(p, as_attachment=True)
             abort(404)
         if action == "plugins":
