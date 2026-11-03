@@ -31,7 +31,7 @@ struct ConnectView: View {
                 Spacer()
 
                 VStack(spacing: 12) {
-                    Button { conn.demo = true; conn.entered = true } label: {
+                    Button { conn.demo = true; conn.entered = true; Notify.demoSample() } label: {
                         Label("Demo (Beta) — no device", systemImage: "play.circle.fill")
                     }
                     .buttonStyle(.bordered).controlSize(.large)

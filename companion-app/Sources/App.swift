@@ -160,6 +160,20 @@ struct PluginItem: Codable, Identifiable {
     var id: String { name }
 }
 
+struct FileEntry: Codable, Identifiable {
+    var name: String
+    var dir: Bool
+    var size: Int
+    var id: String { name }
+}
+
+struct FsListing: Codable {
+    var ok: Bool
+    var path: String
+    var items: [FileEntry]
+    var err: String?
+}
+
 // MARK: - Client
 
 enum PwnClient {
@@ -248,6 +262,102 @@ enum PwnClient {
             let (data, _) = try await URLSession.shared.data(for: request(url, conn))
             return (try? JSONDecoder().decode([String].self, from: data)) ?? []
         } catch { return [] }
+    }
+
+    // MARK: File manager (root FS)
+
+    static func fsList(_ conn: ConnectionStore, _ path: String) async -> FsListing {
+        if conn.demo { return DemoData.fsListing(path) }
+        let e = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        guard let url = conn.companionURL("fs_ls", "&path=\(e)") else {
+            return FsListing(ok: false, path: path, items: [], err: "bad url")
+        }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request(url, conn, timeout: 12))
+            return (try? JSONDecoder().decode(FsListing.self, from: data))
+                ?? FsListing(ok: false, path: path, items: [], err: "parse")
+        } catch { return FsListing(ok: false, path: path, items: [], err: "no connection") }
+    }
+
+    /// Returns (ok, isText, content-as-string, message).
+    static func fsRead(_ conn: ConnectionStore, _ path: String) async -> (Bool, Bool, String, String) {
+        if conn.demo { return (true, true, "# demo file: \(path)\nhello = true\n", "") }
+        let e = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        guard let url = conn.companionURL("fs_read", "&path=\(e)") else { return (false, false, "", "bad url") }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request(url, conn, timeout: 20))
+            guard let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                return (false, false, "", "parse")
+            }
+            if (j["ok"] as? Bool) != true { return (false, false, "", (j["msg"] as? String) ?? "error") }
+            let isText = (j["text"] as? Bool) ?? false
+            let b64 = (j["b64"] as? String) ?? ""
+            if isText, let d = Data(base64Encoded: b64), let s = String(data: d, encoding: .utf8) {
+                return (true, true, s, "")
+            }
+            return (true, false, "", "binary — use download")
+        } catch { return (false, false, "", "no connection") }
+    }
+
+    @discardableResult
+    static func fsWrite(_ conn: ConnectionStore, _ path: String, _ content: String) async -> (Bool, String) {
+        if conn.demo { return (true, "demo") }
+        let e = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        guard let url = conn.companionURL("fs_write", "&path=\(e)&b64=1") else { return (false, "bad url") }
+        var req = request(url, conn, timeout: 20)
+        req.httpMethod = "POST"
+        req.httpBody = Data(Data(content.utf8).base64EncodedString().utf8)
+        do {
+            let (data, _) = try await URLSession.shared.data(for: req)
+            let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return (((j?["ok"]) as? Bool) ?? false, (j?["msg"] as? String) ?? "saved")
+        } catch { return (false, "no connection") }
+    }
+
+    @discardableResult
+    static func fsDelete(_ conn: ConnectionStore, _ path: String, recursive: Bool = false) async -> Bool {
+        if conn.demo { return true }
+        let e = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        guard let url = conn.companionURL("fs_rm", "&path=\(e)\(recursive ? "&recursive=1" : "")") else { return false }
+        if let (data, _) = try? await URLSession.shared.data(for: request(url, conn, timeout: 15)) {
+            return decodeOK(data)
+        }
+        return false
+    }
+
+    @discardableResult
+    static func fsMkdir(_ conn: ConnectionStore, _ path: String) async -> Bool {
+        if conn.demo { return true }
+        let e = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        guard let url = conn.companionURL("fs_mkdir", "&path=\(e)") else { return false }
+        if let (data, _) = try? await URLSession.shared.data(for: request(url, conn, timeout: 12)) {
+            return decodeOK(data)
+        }
+        return false
+    }
+
+    static func fsDownload(_ conn: ConnectionStore, _ path: String) async -> Data? {
+        if conn.demo { return Data("demo file: \(path)".utf8) }
+        let e = path.addingPercentEncoding(withAllowedCharacters: .urlQueryAllowed) ?? path
+        guard let url = conn.companionURL("fs_dl", "&path=\(e)") else { return nil }
+        return try? await URLSession.shared.data(for: request(url, conn, timeout: 40)).0
+    }
+
+    @discardableResult
+    static func pluginSet(_ conn: ConnectionStore, _ name: String, _ on: Bool) async -> (Bool, String) {
+        if conn.demo { return (true, "demo") }
+        guard let url = conn.companionURL("plugin_set", "&name=\(name)&on=\(on ? 1 : 0)") else { return (false, "bad url") }
+        do {
+            let (data, _) = try await URLSession.shared.data(for: request(url, conn, timeout: 12))
+            let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            return (((j?["ok"]) as? Bool) ?? false, (j?["msg"] as? String) ?? "")
+        } catch { return (false, "no connection") }
+    }
+
+    private static func decodeOK(_ data: Data?) -> Bool {
+        guard let data = data,
+              let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return false }
+        return (j["ok"] as? Bool) ?? false
     }
 
     static func pcapData(_ conn: ConnectionStore, _ name: String) async -> Data? {

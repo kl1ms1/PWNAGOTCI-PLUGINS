@@ -40,6 +40,29 @@ enum DemoData {
         ]
     }
 
+    /// Fake root filesystem for the demo file browser.
+    static func fsListing(_ path: String) -> FsListing {
+        let tree: [String: [FileEntry]] = [
+            "/root": [
+                FileEntry(name: "handshakes", dir: true, size: 0),
+                FileEntry(name: ".pwndex", dir: true, size: 0),
+                FileEntry(name: "brain.json", dir: false, size: 4096),
+                FileEntry(name: "btlink_ble.py", dir: false, size: 5120),
+            ],
+            "/root/handshakes": [
+                FileEntry(name: "HomeWiFi_a0285da0c4c0.pcap", dir: false, size: 24576),
+                FileEntry(name: "Xiaomi_67_504f3bcb39fe.pcap", dir: false, size: 18432),
+            ],
+            "/etc/pwnagotchi": [
+                FileEntry(name: "config.toml", dir: false, size: 2048),
+                FileEntry(name: "config.toml.companion.bak", dir: false, size: 2040),
+            ],
+        ]
+        return FsListing(ok: true, path: path, items: tree[path] ?? [
+            FileEntry(name: "(demo) no listing", dir: false, size: 0)
+        ], err: nil)
+    }
+
     /// A drawn pwnagotchi-style face for the Dash "screen" in demo mode.
     static func faceImage(_ color: UIColor = .white) -> UIImage {
         let size = CGSize(width: 250, height: 122)

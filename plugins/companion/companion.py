@@ -54,7 +54,7 @@ class _LinkWidget(_Widget):
 
 class Companion(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "1.2.1"
+    __version__ = "1.3.0"
     __license__ = "MIT"
     __description__ = "One plugin for the Pwn Companion app: Bluetooth + BLE + JSON API."
 
@@ -592,6 +592,80 @@ class Companion(plugins.Plugin):
                 return p
         return None
 
+    # --- file manager (root FS) -------------------------------------------
+    def _fs_ls(self, path):
+        path = path or "/"
+        try:
+            entries = os.listdir(path)
+        except Exception as e:
+            return {"ok": False, "path": path, "err": str(e), "items": []}
+        items = []
+        for n in entries:
+            full = os.path.join(path, n)
+            try:
+                isdir = os.path.isdir(full)
+                sz = 0 if isdir else os.path.getsize(full)
+            except Exception:
+                isdir, sz = False, 0
+            items.append({"name": n, "dir": isdir, "size": sz})
+        items.sort(key=lambda x: (not x["dir"], x["name"].lower()))
+        return {"ok": True, "path": os.path.abspath(path), "items": items}
+
+    def _config_path(self):
+        for p in ("/etc/pwnagotchi/config.toml",
+                  "/home/pi/.config/pwnagotchi/config.toml"):
+            if os.path.isfile(p):
+                return p
+        return "/etc/pwnagotchi/config.toml"
+
+    def _plugin_set(self, name, on):
+        import re
+        name = re.sub(r"[^A-Za-z0-9_\-]", "", name or "")
+        if not name:
+            return False, "bad name"
+        p = self._config_path()
+        key = "main.plugins.%s.enabled" % name
+        val = "true" if on else "false"
+        try:
+            with open(p, "r") as f:
+                lines = f.readlines()
+        except Exception as e:
+            return False, str(e)
+        pat = re.compile(r'^\s*#?\s*main\.plugins\.%s\.enabled\s*=' % re.escape(name))
+        idx = None
+        for i, ln in enumerate(lines):
+            if pat.match(ln):
+                idx = i
+                break
+        if idx is not None:
+            lines[idx] = "%s = %s\n" % (key, val)
+        else:
+            # insert after the last root-level main.plugins. / main. line (safe
+            # for jayofelony's flat dotted-key config.toml)
+            after = None
+            for i, ln in enumerate(lines):
+                if re.match(r'^\s*main\.plugins\.', ln):
+                    after = i
+            if after is None:
+                for i, ln in enumerate(lines):
+                    if re.match(r'^\s*main\.', ln):
+                        after = i
+            if after is None:
+                lines.insert(0, "%s = %s\n" % (key, val))
+            else:
+                lines.insert(after + 1, "%s = %s\n" % (key, val))
+        try:
+            try:
+                import shutil
+                shutil.copy2(p, p + ".companion.bak")
+            except Exception:
+                pass
+            with open(p, "w") as f:
+                f.writelines(lines)
+        except Exception as e:
+            return False, str(e)
+        return True, "%s=%s saved (restart to apply)" % (key, val)
+
     def on_webhook(self, path, request):
         from flask import jsonify, abort
         action = request.args.get("action", "")
@@ -662,4 +736,75 @@ class Companion(plugins.Plugin):
             if cmd not in ("reboot", "shutdown", "restart", "manual", "auto"):
                 return jsonify(ok=False, msg="bad cmd"), 400
             return jsonify(ok=self._control(cmd), cmd=cmd)
+        if action == "plugin_set":
+            name = request.args.get("name") or ""
+            on = (request.args.get("on") or "1") in ("1", "true", "True")
+            ok, msg = self._plugin_set(name, on)
+            return jsonify(ok=ok, msg=msg)
+        # --- file manager -------------------------------------------------
+        if action == "fs_ls":
+            return jsonify(self._fs_ls(request.args.get("path") or "/root"))
+        if action == "fs_read":
+            import base64
+            p = request.args.get("path") or ""
+            try:
+                sz = os.path.getsize(p)
+                if sz > 1024 * 1024:
+                    return jsonify(ok=False, msg="too big (%d bytes), use download" % sz)
+                with open(p, "rb") as f:
+                    data = f.read()
+                try:
+                    data.decode("utf-8")
+                    text = True
+                except Exception:
+                    text = False
+                return jsonify(ok=True, text=text, size=sz,
+                               b64=base64.b64encode(data).decode("ascii"))
+            except Exception as e:
+                return jsonify(ok=False, msg=str(e))
+        if action == "fs_write":
+            import base64
+            p = request.args.get("path") or ""
+            if not p:
+                return jsonify(ok=False, msg="no path")
+            try:
+                body = request.get_data() or b""
+                if request.args.get("b64") in ("1", "true"):
+                    body = base64.b64decode(body)
+                d = os.path.dirname(p)
+                if d and not os.path.isdir(d):
+                    os.makedirs(d, exist_ok=True)
+                with open(p, "wb") as f:
+                    f.write(body)
+                return jsonify(ok=True, size=len(body))
+            except Exception as e:
+                return jsonify(ok=False, msg=str(e))
+        if action == "fs_rm":
+            p = request.args.get("path") or ""
+            try:
+                if os.path.isdir(p):
+                    import shutil
+                    if request.args.get("recursive") in ("1", "true"):
+                        shutil.rmtree(p)
+                    else:
+                        os.rmdir(p)
+                else:
+                    os.remove(p)
+                return jsonify(ok=True)
+            except Exception as e:
+                return jsonify(ok=False, msg=str(e))
+        if action == "fs_mkdir":
+            p = request.args.get("path") or ""
+            try:
+                os.makedirs(p, exist_ok=True)
+                return jsonify(ok=True)
+            except Exception as e:
+                return jsonify(ok=False, msg=str(e))
+        if action == "fs_dl":
+            from flask import send_file
+            p = request.args.get("path") or ""
+            if p and os.path.isfile(p):
+                return send_file(p, as_attachment=True,
+                                 download_name=os.path.basename(p))
+            abort(404)
         abort(404)
