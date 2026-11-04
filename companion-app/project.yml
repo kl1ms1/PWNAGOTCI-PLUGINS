@@ -16,8 +16,8 @@ targets:
       base:
         PRODUCT_NAME: PwnCompanion
         PRODUCT_BUNDLE_IDENTIFIER: com.pwncompanion.app
-        MARKETING_VERSION: "0.1.0"
-        CURRENT_PROJECT_VERSION: "1"
+        MARKETING_VERSION: "9.0"
+        CURRENT_PROJECT_VERSION: "9"
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_FILE: Resources/Info.plist
         GENERATE_INFOPLIST_FILE: "NO"
