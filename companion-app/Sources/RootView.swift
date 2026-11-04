@@ -722,6 +722,13 @@ struct SettingsView: View {
                     Text("Enable the companion plugin on the Pi. On Bluetooth pairing pwnagotchi shows a code full-screen — type it on the iPhone. Then turn on Personal Hotspot: the Pi joins it and shows its IP — put it here (port 8080). Login/password are from config.toml (ui.web.username / ui.web.password).")
                         .font(.footnote).foregroundStyle(.secondary)
                 }
+                Section {
+                    HStack {
+                        Text("App build").foregroundStyle(.secondary)
+                        Spacer()
+                        Text(APP_BUILD).font(.caption.monospaced()).foregroundStyle(.secondary)
+                    }
+                }
             }
             .navigationTitle("Settings")
             .sheet(isPresented: $editConfig) {

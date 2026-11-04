@@ -2,6 +2,9 @@ import SwiftUI
 import UIKit
 import WidgetKit
 
+/// Visible build marker — check it in Settings to confirm the latest install.
+let APP_BUILD = "v9 · 2026-11-04 · splash+map-pw"
+
 /// Writes the latest status into the shared app group so the home-screen
 /// widget can display it, then asks WidgetKit to refresh.
 enum SharedStore {
