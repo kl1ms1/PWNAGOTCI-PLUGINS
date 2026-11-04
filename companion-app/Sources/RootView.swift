@@ -274,7 +274,6 @@ struct DashView: View {
             if let c = s.cpu { cpuHist.append(c); if cpuHist.count > 30 { cpuHist.removeFirst() } }
             if let t = s.temp { tempHist.append(t); if tempHist.count > 30 { tempHist.removeFirst() } }
             if let m = s.mem { memHist.append(m); if memHist.count > 30 { memHist.removeFirst() } }
-            if !conn.demo { SharedStore.write(s) }
         }
     }
 }

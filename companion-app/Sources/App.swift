@@ -1,26 +1,8 @@
 import SwiftUI
 import UIKit
-import WidgetKit
 
 /// Visible build marker — check it in Settings to confirm the latest install.
-let APP_BUILD = "v9 · 2026-11-04 · splash+map-pw"
-
-/// Writes the latest status into the shared app group so the home-screen
-/// widget can display it, then asks WidgetKit to refresh.
-enum SharedStore {
-    static let suite = "group.com.pwncompanion"
-    static func write(_ s: DeviceStatus) {
-        guard let d = UserDefaults(suiteName: suite) else { return }
-        d.set(s.name ?? "pwnagotchi", forKey: "name")
-        d.set((s.mode ?? "—").uppercased(), forKey: "mode")
-        d.set(Int(s.battery ?? 0), forKey: "battery")
-        d.set(s.shakes ?? 0, forKey: "shakes")
-        d.set(s.networks ?? 0, forKey: "nets")
-        d.set(s.cracked ?? 0, forKey: "cracked")
-        d.set(Date().timeIntervalSince1970, forKey: "updated")
-        WidgetCenter.shared.reloadAllTimelines()
-    }
-}
+let APP_BUILD = "v9.1 · 2026-11-04 · installable"
 
 @main
 struct PwnCompanionApp: App {
