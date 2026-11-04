@@ -212,6 +212,7 @@ struct PinSheet: View {
     @State private var msg = ""
     @State private var busy = false
     @State private var shareURL: URL?
+    @State private var pw = ""
     @Environment(\.dismiss) private var dismiss
 
     var body: some View {
@@ -222,6 +223,11 @@ struct PinSheet: View {
                     Text(pin.id).font(.caption).foregroundStyle(.secondary)
                     Text(String(format: "%.5f, %.5f", pin.lat, pin.lon))
                         .font(.caption2).foregroundStyle(.secondary)
+                }
+                Section("Password (if your network)") {
+                    TextField("password", text: $pw)
+                        .autocorrectionDisabled().textInputAutocapitalization(.never)
+                    Button { savePassword() } label: { Label("Save password", systemImage: "key.fill") }
                 }
                 Section("Actions") {
                     Button { downloadHash() } label: { Label("Download hash (.pcap)", systemImage: "arrow.down.doc") }
@@ -234,6 +240,15 @@ struct PinSheet: View {
             .navigationTitle(pin.ssid).navigationBarTitleDisplayMode(.inline)
             .toolbar { ToolbarItem(placement: .topBarTrailing) { Button("Done") { dismiss() } } }
             .sheet(item: $shareURL) { url in ActivityView(items: [url]) }
+        }
+    }
+
+    private func savePassword() {
+        busy = true; msg = ""
+        Task {
+            defer { busy = false }
+            let ok = (try? await PwnClient.setPassword(conn, mac: pin.id, pw: pw)) ?? false
+            msg = ok ? "✅ Saved & synced to Pwndex" : "❌ Save failed"
         }
     }
 

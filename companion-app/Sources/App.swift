@@ -22,19 +22,28 @@ enum SharedStore {
 @main
 struct PwnCompanionApp: App {
     @StateObject private var conn = ConnectionStore()
+    @State private var splash = true
     var body: some Scene {
         WindowGroup {
-            Group {
-                if conn.entered {
-                    RootView()
-                } else {
-                    ConnectView()
+            ZStack {
+                Group {
+                    if conn.entered {
+                        RootView()
+                    } else {
+                        ConnectView()
+                    }
+                }
+                .environmentObject(conn)
+                .preferredColorScheme(conn.theme.scheme)
+                .fontDesign(conn.font.design)
+                .tint(.primary)
+
+                if splash {
+                    SplashView { splash = false }
+                        .transition(.opacity)
+                        .zIndex(1)
                 }
             }
-            .environmentObject(conn)
-            .preferredColorScheme(conn.theme.scheme)
-            .fontDesign(conn.font.design)
-            .tint(.primary)
         }
     }
 }
