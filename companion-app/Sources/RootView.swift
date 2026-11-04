@@ -533,6 +533,27 @@ struct ControlView: View {
                             FunctionRow(icon: "externaldrive.badge.timemachine", title: "Backup device",
                                         subtitle: "config + pwndex + handshakes → share") { backup() }
                         }
+                        section("wpa-sec auto-sync") {
+                            VStack(alignment: .leading, spacing: 8) {
+                                HStack {
+                                    Text("Auto upload + fetch cracked").font(.callout.weight(.semibold))
+                                    Spacer()
+                                    Text(wpasecLabel(st.wpasec_auto ?? 0)).font(.caption).foregroundStyle(.secondary)
+                                }
+                                Picker("", selection: Binding(
+                                    get: { st.wpasec_auto ?? 0 },
+                                    set: { setWpasec($0) })) {
+                                    Text("Off").tag(0)
+                                    Text("1h").tag(60)
+                                    Text("3h").tag(180)
+                                    Text("6h").tag(360)
+                                    Text("12h").tag(720)
+                                }.pickerStyle(.segmented)
+                                Text("Runs on the device in both AUTO and MANUAL while it has internet — re-sends handshakes and pulls any newly cracked passwords into Pwndex.")
+                                    .font(.caption2).foregroundStyle(.secondary)
+                            }
+                            .padding(14)
+                        }
                         section("Recovery") {
                             FunctionRow(icon: "dot.radiowaves.left.and.right", title: "Fix Bluetooth",
                                         subtitle: "Make pairable + restart BT") {
@@ -577,6 +598,19 @@ struct ControlView: View {
             }
             .task { await loadStatus() }
             .sheet(item: $shareURL) { url in ActivityView(items: [url]) }
+        }
+    }
+
+    private func wpasecLabel(_ m: Int) -> String {
+        m <= 0 ? "off" : (m % 60 == 0 ? "every \(m/60)h" : "every \(m)m")
+    }
+
+    private func setWpasec(_ m: Int) {
+        st.wpasec_auto = m
+        toast = "wpa-sec auto: \(wpasecLabel(m))"
+        Task {
+            _ = await PwnClient.wpasecAuto(conn, min: m)        // takes effect now
+            _ = await PwnClient.cfgSet(conn, "main.plugins.companion.wpasec_auto_min", "\(m)", quote: false)  // survives reboot
         }
     }
 

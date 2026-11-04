@@ -54,7 +54,7 @@ class _LinkWidget(_Widget):
 
 class Companion(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "1.8.0"
+    __version__ = "1.9.0"
     __license__ = "MIT"
     __description__ = "One plugin for the Pwn Companion app: Bluetooth + BLE + JSON API."
 
@@ -86,6 +86,9 @@ class Companion(plugins.Plugin):
         self._shakes = 0
         self._agent = None
         self._ble_script = "/home/pi/btlink_ble.py"
+        self._wpasec_interval = 0      # minutes; 0 = off
+        self._wpasec_last = 0.0
+        self._wpasec_count = 0
 
     # --- lifecycle ---------------------------------------------------------
     def on_loaded(self):
@@ -96,6 +99,10 @@ class Companion(plugins.Plugin):
         self._static_ip = o.get("static_ip", self._static_ip)
         self._dex_f = o.get("pwndex", self._dex_f)
         self._ble_script = o.get("ble_script", self._ble_script)
+        try:
+            self._wpasec_interval = int(o.get("wpasec_auto_min", 0) or 0)
+        except Exception:
+            self._wpasec_interval = 0
         pos = o.get("label_position", "0,83")
         try:
             x, y = str(pos).split(",")
@@ -304,9 +311,27 @@ class Companion(plugins.Plugin):
                 ok, out = self._sh(["bluetoothctl", "show"])
                 self._disc = "Discoverable: yes" in out
                 self._pair = "Pairable: yes" in out
+                self._wpasec_tick()
             except Exception:
                 logging.debug("[companion] keepalive tick failed")
             time.sleep(15)
+
+    def _wpasec_tick(self):
+        """Auto wpa-sec sync (upload new handshakes + download cracked results)
+        on an interval. Runs in both auto and manual mode."""
+        if self._wpasec_interval <= 0:
+            return
+        now = time.time()
+        if now - self._wpasec_last < self._wpasec_interval * 60:
+            return
+        self._wpasec_last = now
+        ok, _msg = self._upload_all()
+        if ok:
+            try:
+                self._wpasec_count = sum(1 for e in self._dex().values() if e.get("pw"))
+            except Exception:
+                pass
+            logging.info("[companion] wpa-sec auto-sync done")
 
     # --- e-ink -------------------------------------------------------------
     def on_ui_setup(self, ui):
@@ -525,6 +550,7 @@ class Companion(plugins.Plugin):
             "sd_free": self._sd_free(), "pcaps": self._pcaps(), "networks": len(dex),
             "cracked": sum(1 for e in dex.values() if e.get("pw")), "shakes": self._shakes,
             "bt": self._status_text(), "battery": self._battery(),
+            "wpasec_auto": self._wpasec_interval, "wpasec_last": int(self._wpasec_last),
         }
 
     def _pwndex(self):
@@ -853,6 +879,16 @@ class Companion(plugins.Plugin):
         if action == "upload_all":
             ok, msg = self._upload_all()
             return jsonify(ok=ok, msg=msg)
+        if action == "wpasec_auto":
+            m = request.args.get("min")
+            if m is not None:
+                try:
+                    self._wpasec_interval = max(0, int(m))
+                    self._wpasec_last = 0.0  # sync on next tick
+                except Exception:
+                    return jsonify(ok=False, msg="bad min")
+            return jsonify(ok=True, interval=self._wpasec_interval,
+                           last=int(self._wpasec_last))
         if action == "pcaps":
             return jsonify(self._pcap_list())
         if action == "hsdirs":

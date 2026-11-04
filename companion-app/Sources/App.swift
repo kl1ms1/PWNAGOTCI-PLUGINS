@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// Visible build marker — check it in Settings to confirm the latest install.
-let APP_BUILD = "v9.1 · 2026-11-04 · installable"
+let APP_BUILD = "v9.2 · 2026-11-04 · wpa-sec auto"
 
 @main
 struct PwnCompanionApp: App {
@@ -154,6 +154,8 @@ struct DeviceStatus: Codable {
     var cracked: Int?
     var shakes: Int?
     var battery: Double?
+    var wpasec_auto: Int?
+    var wpasec_last: Int?
 }
 
 struct NetItem: Codable, Identifiable {
@@ -429,6 +431,19 @@ enum PwnClient {
             let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
             return (((j?["ok"]) as? Bool) ?? false, (j?["msg"] as? String) ?? "")
         } catch { return (false, "no connection") }
+    }
+
+    /// Get/set the auto wpa-sec sync interval (minutes; 0 = off). Returns current.
+    @discardableResult
+    static func wpasecAuto(_ conn: ConnectionStore, min: Int?) async -> Int {
+        if conn.demo { return min ?? 60 }
+        let extra = min.map { "&min=\($0)" } ?? ""
+        guard let url = conn.companionURL("wpasec_auto", extra) else { return 0 }
+        if let (data, _) = try? await URLSession.shared.data(for: request(url, conn, timeout: 10)),
+           let j = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
+            return (j["interval"] as? Int) ?? 0
+        }
+        return 0
     }
 
     /// Full backup tarball (config + pwndex + handshakes).
