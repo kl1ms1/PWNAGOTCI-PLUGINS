@@ -5,6 +5,8 @@ struct DiagnosticsView: View {
     @EnvironmentObject var conn: ConnectionStore
     @State private var results: [Check] = []
     @State private var running = false
+    @State private var shareURL: URL?
+    @State private var exporting = false
 
     struct Check: Identifiable {
         let id = UUID()
@@ -56,12 +58,33 @@ struct DiagnosticsView: View {
                     Button { Task { await run() } } label: {
                         HStack { if running { ProgressView() }; Text(running ? "Running…" : "Run diagnostics").frame(maxWidth: .infinity) }
                     }.buttonStyle(FilledStyle()).disabled(running).padding(.top, 4)
+
+                    Button { exportReport() } label: {
+                        HStack { if exporting { ProgressView() }
+                            Label("Export report (send to Claude)", systemImage: "square.and.arrow.up.on.square")
+                                .frame(maxWidth: .infinity) }
+                    }.buttonStyle(.bordered).disabled(exporting)
+
+                    Text("The report bundles the current state plus the reboot/crash history the device records on every start. Download it and send me the file — we'll find and fix the problem.")
+                        .font(.caption2).foregroundStyle(.secondary)
                 }.padding()
             }
         }
         .navigationTitle("Diagnostics")
         .navigationBarTitleDisplayMode(.inline)
+        .sheet(item: $shareURL) { url in ActivityView(items: [url]) }
         .task { if results.isEmpty { await run() } }
+    }
+
+    private func exportReport() {
+        exporting = true
+        Task {
+            defer { exporting = false }
+            guard let data = await PwnClient.diagData(conn) else { return }
+            let url = FileManager.default.temporaryDirectory.appendingPathComponent("pwn-diag.txt")
+            try? data.write(to: url)
+            shareURL = url
+        }
     }
 
     @ViewBuilder private func icon(_ s: Check.State) -> some View {

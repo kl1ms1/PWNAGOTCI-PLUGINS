@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// Visible build marker — check it in Settings to confirm the latest install.
-let APP_BUILD = "v9.2 · 2026-11-04 · wpa-sec auto"
+let APP_BUILD = "v9.3 · 2026-11-05 · diag report"
 
 @main
 struct PwnCompanionApp: App {
@@ -444,6 +444,15 @@ enum PwnClient {
             return (j["interval"] as? Int) ?? 0
         }
         return 0
+    }
+
+    /// Diagnostics report (current snapshot + reboot/crash history) as a text file.
+    static func diagData(_ conn: ConnectionStore) async -> Data? {
+        if conn.demo {
+            return Data("PWN COMPANION DIAG REPORT (demo)\nuptime: 2h\nthrottled: 0x0\nbattery: 76%\nno errors.\n".utf8)
+        }
+        guard let url = conn.companionURL("diag") else { return nil }
+        return try? await URLSession.shared.data(for: request(url, conn, timeout: 40)).0
     }
 
     /// Full backup tarball (config + pwndex + handshakes).

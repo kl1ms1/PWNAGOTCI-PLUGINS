@@ -54,7 +54,7 @@ class _LinkWidget(_Widget):
 
 class Companion(plugins.Plugin):
     __author__ = "you@example.com"
-    __version__ = "1.9.0"
+    __version__ = "1.10.0"
     __license__ = "MIT"
     __description__ = "One plugin for the Pwn Companion app: Bluetooth + BLE + JSON API."
 
@@ -133,6 +133,58 @@ class Companion(plugins.Plugin):
         self._start_agent()
         self._launch_ble()
         self._start_keepalive()
+        threading.Thread(target=self._write_boot_log, daemon=True).start()
+
+    # --- diagnostics (black box) ------------------------------------------
+    _DIAG_LOG = "/root/pwn-diag.log"
+
+    def _run(self, cmd, timeout=6):
+        try:
+            r = subprocess.run(["bash", "-lc", cmd], capture_output=True,
+                               text=True, timeout=timeout)
+            return ((r.stdout or "") + (r.stderr or "")).strip()
+        except Exception as e:
+            return "ERR: %s" % e
+
+    def _diag_snapshot(self):
+        import time as _t
+        parts = []
+        def sec(title, cmd, tmo=6):
+            parts.append("### %s\n%s" % (title, self._run(cmd, tmo)))
+        parts.append("===== PWN DIAG @ %s =====" % _t.strftime("%Y-%m-%d %H:%M:%S"))
+        parts.append("name: %s  companion: %s" % (self._name, self.__version__))
+        sec("uptime", "uptime; cat /proc/uptime")
+        sec("power/throttle", "vcgencmd get_throttled 2>/dev/null; vcgencmd measure_temp 2>/dev/null")
+        sec("battery(UPS-Lite)", "i2cget -y 1 0x36 4 w 2>/dev/null || echo 'no i2c'")
+        sec("memory", "free -h")
+        sec("disk", "df -h /")
+        sec("services", "systemctl is-active pwnagotchi bluetooth 2>/dev/null")
+        sec("interfaces", "ip -br addr; iwconfig 2>/dev/null | grep -i mode")
+        sec("bluetooth", "bluetoothctl show 2>/dev/null | grep -Ei 'Powered|Discoverable|Pairable' || hciconfig")
+        sec("last reboots", "last -x 2>/dev/null | grep -Ei 'reboot|shutdown' | head -6")
+        sec("kernel wifi/power errors", "dmesg 2>/dev/null | grep -iE 'brcmfmac|under-voltage|voltage|oom|killed process|firmware' | tail -30")
+        sec("pwnagotchi errors", "grep -iE 'error|exception|traceback|bus is down|no clm' /var/log/pwnagotchi.log 2>/dev/null | tail -30 || journalctl -u pwnagotchi -p warning -n 30 --no-pager 2>/dev/null")
+        return "\n\n".join(parts) + "\n"
+
+    def _write_boot_log(self):
+        try:
+            time.sleep(20)  # let the system settle after boot
+            snap = self._diag_snapshot()
+            # keep the rolling log bounded (~256 KB)
+            old = ""
+            try:
+                if os.path.getsize(self._DIAG_LOG) < 256 * 1024:
+                    with open(self._DIAG_LOG, "r", errors="ignore") as f:
+                        old = f.read()
+                else:
+                    with open(self._DIAG_LOG, "r", errors="ignore") as f:
+                        old = f.read()[-128 * 1024:]
+            except Exception:
+                old = ""
+            with open(self._DIAG_LOG, "w") as f:
+                f.write(old + "\n" + snap)
+        except Exception:
+            logging.debug("[companion] boot log failed")
 
     # --- helpers -----------------------------------------------------------
     def _sh(self, args, timeout=12):
@@ -1035,6 +1087,27 @@ class Companion(plugins.Plugin):
                 return send_file(p, as_attachment=True,
                                  download_name=os.path.basename(p))
             abort(404)
+        if action == "diag":
+            from flask import send_file
+            try:
+                history = ""
+                try:
+                    with open(self._DIAG_LOG, "r", errors="ignore") as f:
+                        history = f.read()[-200 * 1024:]
+                except Exception:
+                    history = "(no boot history yet)"
+                report = ("PWN COMPANION DIAG REPORT\n"
+                          "Send this file to debug crashes/reboots.\n\n"
+                          "========== CURRENT SNAPSHOT ==========\n"
+                          + self._diag_snapshot()
+                          + "\n\n========== BOOT / REBOOT HISTORY ==========\n"
+                          + history + "\n")
+                out = "/tmp/pwn-diag.txt"
+                with open(out, "w") as f:
+                    f.write(report)
+                return send_file(out, as_attachment=True, download_name="pwn-diag.txt")
+            except Exception as e:
+                return jsonify(ok=False, msg=str(e)), 500
         if action == "backup":
             from flask import send_file
             import tarfile
