@@ -1,0 +1,3 @@
+# Enable the bootwatch black-box logger.
+# Add to /etc/pwnagotchi/config.toml (or merge this line) then restart pwnagotchi.
+main.plugins.bootwatch.enabled = true
