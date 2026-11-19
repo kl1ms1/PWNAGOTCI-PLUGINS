@@ -487,7 +487,9 @@ struct ControlView: View {
                             GlassCard { Text(toast).font(.footnote).foregroundStyle(.secondary) }
                         }
                         section("Screens") {
-                            NavRow(icon: "terminal", title: "Commands (SSH)", subtitle: "Run shell commands") { CommandsView() }
+                            NavRow(icon: "terminal", title: "Commands", subtitle: "Run shell via plugin") { CommandsView() }
+                            div
+                            NavRow(icon: "terminal.fill", title: "SSH", subtitle: "Real SSH — works even if plugin is off") { SSHView() }
                             div
                             NavRow(icon: "puzzlepiece.extension", title: "Plugins", subtitle: "Enable/disable, open pages") { PluginsView() }
                             div
@@ -750,6 +752,16 @@ struct SettingsView: View {
                         Text("Password"); Spacer()
                         SecureField("", text: $conn.pass).multilineTextAlignment(.trailing)
                     }
+                }
+                Section("SSH (for the SSH terminal)") {
+                    LabeledField("SSH port", text: $conn.sshPort)
+                    LabeledField("SSH user", text: $conn.sshUser)
+                    HStack {
+                        Text("SSH password"); Spacer()
+                        SecureField("", text: $conn.sshPass).multilineTextAlignment(.trailing)
+                    }
+                    Text("Uses Device IP above, port 22. Default pi / raspberry. Works even if the plugin is off — needs the Pi reachable on your Wi-Fi.")
+                        .font(.footnote).foregroundStyle(.secondary)
                 }
                 Section("How to connect") {
                     Text("Enable the companion plugin on the Pi. On Bluetooth pairing pwnagotchi shows a code full-screen — type it on the iPhone. Then turn on Personal Hotspot: the Pi joins it and shows its IP — put it here (port 8080). Login/password are from config.toml (ui.web.username / ui.web.password).")

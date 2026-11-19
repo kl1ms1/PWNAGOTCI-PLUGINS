@@ -4,18 +4,24 @@ options:
   deploymentTarget:
     iOS: "16.1"
   createIntermediateGroups: true
+packages:
+  Citadel:
+    url: https://github.com/orlandos-nl/Citadel
+    from: "0.7.0"
 targets:
   PwnCompanion:
     type: application
     platform: iOS
     sources:
       - path: Sources
+    dependencies:
+      - package: Citadel
     settings:
       base:
         PRODUCT_NAME: PwnCompanion
         PRODUCT_BUNDLE_IDENTIFIER: com.pwncompanion.app
-        MARKETING_VERSION: "9.3"
-        CURRENT_PROJECT_VERSION: "93"
+        MARKETING_VERSION: "9.4"
+        CURRENT_PROJECT_VERSION: "94"
         TARGETED_DEVICE_FAMILY: "1,2"
         INFOPLIST_FILE: Resources/Info.plist
         GENERATE_INFOPLIST_FILE: "NO"

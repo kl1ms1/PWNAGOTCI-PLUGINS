@@ -2,7 +2,7 @@ import SwiftUI
 import UIKit
 
 /// Visible build marker — check it in Settings to confirm the latest install.
-let APP_BUILD = "v9.3 · 2026-11-05 · diag report"
+let APP_BUILD = "v9.4 · 2026-11-19 · SSH terminal"
 
 @main
 struct PwnCompanionApp: App {
@@ -94,6 +94,9 @@ final class ConnectionStore: ObservableObject {
     @Published var faceColor: Color { didSet { save() } }   // any color (Apple picker)
     @Published var font: FontStyle { didSet { save() } }
     @Published var notify: Bool { didSet { save() } }   // local alerts on new handshakes
+    @Published var sshPort: String { didSet { save() } }   // SSH (system sshd, no plugin needed)
+    @Published var sshUser: String { didSet { save() } }
+    @Published var sshPass: String { didSet { save() } }
     @Published var entered = false     // passed the connect screen
     @Published var demo = false        // demo/beta mode (fake data, no device)
 
@@ -111,6 +114,9 @@ final class ConnectionStore: ObservableObject {
         faceColor = Color(red: fr, green: fg, blue: fb)
         font = FontStyle(rawValue: d.string(forKey: "font") ?? "") ?? .rounded
         notify = d.object(forKey: "notify") as? Bool ?? false
+        sshPort = d.string(forKey: "sshPort") ?? "22"
+        sshUser = d.string(forKey: "sshUser") ?? "pi"
+        sshPass = d.string(forKey: "sshPass") ?? "raspberry"
     }
 
     var faceUIColor: UIColor { UIColor(faceColor) }
@@ -126,6 +132,7 @@ final class ConnectionStore: ObservableObject {
         d.set(Double(r), forKey: "faceR"); d.set(Double(g), forKey: "faceG"); d.set(Double(b), forKey: "faceB")
         d.set(font.rawValue, forKey: "font")
         d.set(notify, forKey: "notify")
+        d.set(sshPort, forKey: "sshPort"); d.set(sshUser, forKey: "sshUser"); d.set(sshPass, forKey: "sshPass")
     }
 
     var baseURL: URL? { URL(string: "http://\(host):\(port)") }
