@@ -7,7 +7,7 @@ options:
 packages:
   Citadel:
     url: https://github.com/orlandos-nl/Citadel
-    from: "0.7.0"
+    exactVersion: "0.8.0"
 targets:
   PwnCompanion:
     type: application
